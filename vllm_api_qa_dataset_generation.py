@@ -90,12 +90,29 @@ def generate_qa_pairs(text):
         try:
             qa_pairs = json.loads(answer)
             return qa_pairs
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             print(f"无法解析生成的文本为 JSON: {answer}")
+            print(f"JSON 解析错误: {e}")
             return []
     except requests.RequestException as e:
         print(f"请求 API 时出错: {e}")
         return []
+
+
+def save_to_file(data, file_path):
+    """
+    将数据保存到文件中，并添加错误处理
+    :param data: 要保存的数据
+    :param file_path: 文件路径
+    """
+    try:
+        with open(file_path, 'w', encoding='utf-8') as file:
+            json.dump(data, file, ensure_ascii=False, indent=4)
+        print(f"数据已成功保存到 {file_path}")
+    except IOError as e:
+        print(f"保存文件时出错: {e}")
+    except TypeError as e:
+        print(f"数据序列化错误: {e}")
 
 
 def process_files():
@@ -111,25 +128,28 @@ def process_files():
     file_list = [f for f in os.listdir(SPLIT_FILES_DIR) if f.endswith('.md')]
     for filename in tqdm(file_list, desc="Processing Files", unit="file"):
         file_path = os.path.join(SPLIT_FILES_DIR, filename)
-        with open(file_path, 'r', encoding='utf-8') as file:
-            content = file.read()
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                content = file.read()
 
-        # 生成问答对
-        qa_pairs = generate_qa_pairs(content)
-        all_qa_pairs.extend(qa_pairs)
+            # 生成问答对
+            qa_pairs = generate_qa_pairs(content)
+            if not qa_pairs:
+                print(f"警告: 未生成任何问答对，跳过文件 {filename}")
+                continue
 
-        # 将问答对保存到单独的文件中
-        output_filename = os.path.splitext(filename)[0] + '_qa.json'
-        output_path = os.path.join(OUTPUT_DIR, output_filename)
-        with open(output_path, 'w', encoding='utf-8') as output_file:
-            json.dump(qa_pairs, output_file, ensure_ascii=False, indent=4)
-        print(f"为 {filename} 生成的问答对已保存到 {output_path}")
+            all_qa_pairs.extend(qa_pairs)
+
+            # 将问答对保存到单独的文件中
+            output_filename = os.path.splitext(filename)[0] + '_qa.json'
+            output_path = os.path.join(OUTPUT_DIR, output_filename)
+            save_to_file(qa_pairs, output_path)
+        except Exception as e:
+            print(f"处理文件 {filename} 时出错: {e}")
 
     # 将所有问答对保存到一个文件中
     all_qa_output_path = os.path.join(OUTPUT_DIR, ALL_QA_OUTPUT_FILE)
-    with open(all_qa_output_path, 'w', encoding='utf-8') as all_qa_file:
-        json.dump(all_qa_pairs, all_qa_file, ensure_ascii=False, indent=4)
-    print(f"所有问答对已保存到 {all_qa_output_path}")
+    save_to_file(all_qa_pairs, all_qa_output_path)
 
 
 if __name__ == "__main__":
