@@ -225,6 +225,13 @@ def generate_code(
     result = {"status": "success", "message": ""}
     
     try:
+        # Generate plot code conditionally
+        plot_code = '''        # Step 4: Generate plot
+        plot_path = generate_qgst_plot(DIAMETER, excel_path)''' if include_plot else '''        # Step 4: Plot generation disabled
+        # plot_path = generate_qgst_plot(DIAMETER, excel_path)'''
+        
+        plot_print = '''        print(f"Plot saved to: {plot_path}")''' if include_plot else '''        # print(f"Plot saved to: {plot_path}")'''
+        
         # Generate standalone code template
         code_template = f'''#!/usr/bin/env python3
 """
@@ -235,7 +242,7 @@ Generated automatically - no MCP dependencies required
 import os
 import matplotlib.pyplot as plt
 import subprocess
-from openpyxl import load_workbook·
+from openpyxl import load_workbook
 import OLGAOutput2xlsx
 
 # Configuration
@@ -380,14 +387,12 @@ def main():
         # Step 3: Process results
         excel_path = process_olga_results(PIPELINE_PATH)
         
-        # Step 4: Generate plot (if requested)
-        {"if include_plot:" if include_plot else "# Plot generation disabled"}
-        {"plot_path = generate_qgst_plot(DIAMETER, excel_path)" if include_plot else "# plot_path = generate_qgst_plot(DIAMETER, excel_path)"}
+{plot_code}
         
         print("=" * 50)
         print("Workflow completed successfully!")
         print(f"Results saved to: {{excel_path}}")
-        {"print(f'Plot saved to: {plot_path}')" if include_plot else "# print(f'Plot saved to: {plot_path}')"}
+{plot_print}
         print("=" * 50)
         
     except Exception as e:
@@ -407,19 +412,19 @@ if __name__ == "__main__":
         if os.name != 'nt':  # Not Windows
             os.chmod(output_path, 0o755)
         
-        result["message"] = f"Standalone code generated successfully: {{output_path}}"
+        result["message"] = f"Standalone code generated successfully: {output_path}"
         result["output_file"] = output_path
-        result["parameters"] = {{
+        result["parameters"] = {
             "diameter": diameter,
             "pipeline_path": pipeline_path,
             "include_plot": include_plot
-        }}
+        }
         
         return result
         
     except Exception as e:
         result["status"] = "error"
-        result["message"] = f"Failed to generate code: {{str(e)}}"
+        result["message"] = f"Failed to generate code: {str(e)}"
         return result
 
 # Start MCP Server
