@@ -89,31 +89,31 @@ class PlaywrightCodeInterpreter:
         template = """
         /no_think You are a professional Playwright code generator. Convert natural language to robust Python automation code with the following guidelines:
 
-        ### 鲁棒性要求 (Robustness Requirements):
-        1. **生命周期管理**：仅在所有操作完成后调用`context.close()`和`browser.close()`，避免过早关闭
-        2. **等待策略**：
-           - 使用`wait_for_load_state("networkidle")`确保页面完全加载
-           - 对关键元素添加`wait_for_selector(state="visible")`显式等待
-           - 对异步操作使用`expect`断言验证元素状态
-        3. **定位策略**：
-           - 优先使用`get_by_text`、`get_by_role`、`get_by_label`等语义化选择器
-           - 避免依赖`first`、`nth`等索引定位，改用唯一标识
-           - 对动态元素使用`data-test`属性或明确文本内容
-        4. **异步处理**：
-           - 识别并处理页面模态框、加载指示器
-           - 对AJAX内容使用`wait_for_load_state`或自定义等待
-           - 使用`try-except`块处理元素不存在异常
-        5. **代码结构**：
-           - 包含必要导入：`from playwright.sync_api import sync_playwright, expect`
-           - 封装在`run(playwright)`函数中
-           - 添加注释说明关键步骤
-        6. **执行优化**：
-           - 添加`slow_mo=200`参数便于调试
-           - 关键操作后添加合理等待
-           - 最后添加`time.sleep(5)`延迟关闭浏览器
+        ### Robustness Requirements:
+        1. **Lifecycle Management**: Only call `context.close()` and `browser.close()` after all operations are completed to avoid premature closure
+        2. **Waiting Strategies**:
+           - Use `wait_for_load_state("networkidle")` to ensure the page is fully loaded
+           - Add `wait_for_selector(state="visible")` explicit waits for key elements
+           - Use `expect` assertions to verify element states for asynchronous operations
+        3. **Location Strategies**:
+           - Prioritize semantic selectors like `get_by_text`, `get_by_role`, `get_by_label`
+           - Avoid relying on indexes like `first`, `nth`; use unique identifiers instead
+           - Use `data-test` attributes or explicit text content for dynamic elements
+        4. **Asynchronous Handling**:
+           - Identify and handle page modals and loading indicators
+           - Use `wait_for_load_state` or custom waits for AJAX content
+           - Use `try-except` blocks to handle element not found exceptions
+        5. **Code Structure**:
+           - Include necessary imports: `from playwright.sync_api import sync_playwright, expect`
+           - Enclose in a `run(playwright)` function
+           - Add comments to explain key steps
+        6. **Execution Optimization**:
+           - Add `slow_mo=200` parameter for debugging convenience
+           - Add reasonable waits after key operations
+           - Add a final `time.sleep(5)` delay before closing the browser
         
         Example input:
-        "访问网站，登录系统，添加商品到购物车"
+        "Visit the website, log in to the system, add items to the shopping cart"
         
         Example output:
         from playwright.sync_api import sync_playwright, expect
@@ -124,21 +124,21 @@ class PlaywrightCodeInterpreter:
             context = browser.new_context(ignore_https_errors=True)
             page = context.new_page()
             
-            # 导航到网站并等待加载
+            # Navigate to the website and wait for loading
             page.goto("https://example.com", wait_until="networkidle")
             
-            # 登录系统
+            # Log in to the system
             page.get_by_label("Username").fill("user")
             page.get_by_label("Password").fill("pass")
             page.get_by_text("Login").click()
             page.wait_for_selector("text=Dashboard", state="visible")
             
-            # 添加商品到购物车
+            # Add items to the shopping cart
             page.get_by_text("Products").click()
             page.get_by_text("Add to Cart").first.click()
             page.get_by_role("link", name="Cart").click()
             
-            # 延迟关闭以便观察
+            # Delay closure for observation
             time.sleep(5)
             context.close()
             browser.close()
@@ -147,7 +147,7 @@ class PlaywrightCodeInterpreter:
             run(playwright)
         
         INPUT: {text}
-        OUTPUT: 鲁棒的Playwright自动化测试代码（Python）
+        OUTPUT: Robust Playwright automation test code (Python)
         """
         
         system_message_prompt = SystemMessagePromptTemplate.from_template(template)
@@ -633,15 +633,15 @@ class PlaywrightCodeInterpreter:
 import time
 
 def run(playwright):
-    # 启动浏览器（添加slow_mo便于观察，非无头模式）
+    # Launch browser (add slow_mo for observation, non-headless mode)
     browser = playwright.chromium.launch(headless=False, slow_mo=200)
     context = browser.new_context()
     page = context.new_page()
     
-    # 导航到页面并等待完全加载
+    # Navigate to the page and wait for full loading
     page.goto("https://163.184.132.77/liveops/jobs", wait_until="networkidle")
     
-    # 创建新Job（使用语义化选择器）
+    # Create a new Job (use semantic selector)
     create_job_btn = page.get_by_text("Create New Job")
     expect(create_job_btn).to_be_visible()
     create_job_btn.click()
@@ -649,74 +649,74 @@ def run(playwright):
     page.get_by_label("Job Name").fill("test123")
     page.get_by_text("Create New Job", exact=True).click()
     
-    # 等待Job创建完成
+    # Wait for Job creation to complete
     page.wait_for_selector("text=test123", state="visible", timeout=5000)
     page.get_by_text("test123").click()
     
-    # 填写FDP Activity ID
+    # Fill in FDP Activity ID
     fdp_activity_id = page.get_by_label("FDP Activity ID")
     fdp_activity_id.click()
-    fdp_activity_id.dblclick()  # 双击选择现有内容
+    fdp_activity_id.dblclick()  # Double-click to select existing content
     
-    # 选择Rig Type（添加等待和断言）
+    # Select Rig Type (add waiting and assertion)
     rig_type_selector = page.locator("mat-grid-list").get_by_role("link", name="Rig Typearrow_drop_downRig")
     expect(rig_type_selector).to_be_visible()
     rig_type_selector.click()
     
     page.get_by_text("Jack Up").click()
     page.get_by_text("Save").click()
-    page.wait_for_load_state("networkidle")  # 等待保存完成
+    page.wait_for_load_state("networkidle")  # Wait for saving to complete
     
-    # 导航到Well Design
+    # Navigate to Well Design
     well_design = page.locator("#expanded-side-nav").get_by_text("Well Design")
     expect(well_design).to_be_visible()
     well_design.click()
     page.wait_for_load_state("networkidle")
     
-    # 填写Well Design参数
+    # Fill in Well Design parameters
     page.get_by_text("8.5").click()
     page.get_by_label("Input Editor").fill("12.25")
     
-    # 处理第二个输入框（使用更稳定的选择器）
+    # Process the second input box (use a more stable selector)
     input_selector = page.locator("span:has-text('50000')").first.locator("..")
     expect(input_selector).to_be_clickable()
     input_selector.click()
     page.get_by_label("Input Editor").fill("2000")
     
-    # 保存Well Design
+    # Save Well Design
     page.get_by_text("Save").click()
     page.wait_for_load_state("networkidle")
     
-    # 导航到Run Manager
+    # Navigate to Run Manager
     run_manager = page.locator("#expanded-side-nav").get_by_text("Run Manager")
     expect(run_manager).to_be_visible()
     run_manager.click()
     page.wait_for_load_state("networkidle")
     
-    # 添加Run
+    # Add Run
     page.get_by_text("Add Run").click()
     page.get_by_label("Run Name").fill("ts1")
     page.get_by_text("Add Run").click()
     page.wait_for_selector("text=ts1", state="visible", timeout=5000)
     
-    # 添加工具（使用try-except处理可能的异常）
+    # Add tools (use try-except to handle possible exceptions)
     try:
         page.get_by_text("Add New Tool").click()
         page.get_by_label("Enter").fill("leh-qt")
         page.get_by_text("LEH-QT").click()
         
-        # 使用更明确的选择器代替索引
+        # Use a more explicit selector instead of an index
         page.locator("#toollist").get_by_role("button", name="Add another tool").click()
         
         page.get_by_label("Enter").fill("edtc-b")
         page.get_by_text("EDTC-B").click()
     except Exception as e:
-        print(f"工具添加异常: {e}")
+        print(f"Tool addition exception: {e}")
     
-    # 延迟关闭浏览器，便于观察结果
-    time.sleep(5)  # 暂停5秒
+    # Delay closing the browser for result observation
+    time.sleep(5)  # Pause for 5 seconds
     
-    # 关闭浏览器（最后执行）
+    # Close the browser (execute last)
     context.close()
     browser.close()
 
