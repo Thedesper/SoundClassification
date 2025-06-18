@@ -52,7 +52,7 @@ class PlaywrightCodeInterpreter:
         )
         
         template = """
-        You are a professional Playwright code interpreter. Convert Python Playwright code into clear, concise natural language instructions.
+        /no_think You are a professional Playwright code interpreter. Convert Python Playwright code into clear, concise natural language instructions.
         
         Output format:
         1. Step-by-step description of actions
@@ -87,7 +87,7 @@ class PlaywrightCodeInterpreter:
         )
         
         template = """
-        You are a professional Playwright code generator. Convert natural language to robust Python automation code with the following guidelines:
+        /no_think You are a professional Playwright code generator. Convert natural language to robust Python automation code with the following guidelines:
 
         ### 鲁棒性要求 (Robustness Requirements):
         1. **生命周期管理**：仅在所有操作完成后调用`context.close()`和`browser.close()`，避免过早关闭
@@ -121,7 +121,7 @@ class PlaywrightCodeInterpreter:
 
         def run(playwright):
             browser = playwright.chromium.launch(headless=False, slow_mo=200)
-            context = browser.new_context()
+            context = browser.new_context(ignore_https_errors=True)
             page = context.new_page()
             
             # 导航到网站并等待加载
