@@ -1,161 +1,309 @@
-# -*- coding: utf-8 -*-
-# @place: Pudong, Shanghai
-# @file: bge_base_zh_eval.py
-# @time: 2024/6/6 16:32
-import json
-import time
-import torch
-from datasets import Dataset
-from sentence_transformers import SentenceTransformer
-from sentence_transformers.evaluation import InformationRetrievalEvaluator
-from sentence_transformers.util import cos_sim
-from sentence_transformers.losses import MultipleNegativesRankingLoss
-from sentence_transformers import SentenceTransformerTrainingArguments
-from sentence_transformers.training_args import BatchSamplers
-from sentence_transformers import SentenceTransformerTrainer
-from sklearn.model_selection import train_test_split
-from pprint import pprint
+import tkinter as tk
+from tkinter import scrolledtext, messagebox, ttk
+import subprocess
+import tempfile
+import os
+import sys
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain_community.llms import Ollama
+from langchain.prompts.chat import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate
+)
 
-start_time = time.time()
+# Model configuration
+MODEL_NAME = "qwen3:32b-q8_0"
+API_BASE = "http://163.184.132.210:11434"
 
-# Function to load and process individual QA files
-def load_individual_qa_files(directory):
-    qa_pairs_with_source = []
-    for filename in os.listdir(directory):
-        if filename.endswith(".md"):
-            file_path = os.path.join(directory, filename)
+class PlaywrightCodeInterpreter:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Playwright Code Interpreter")
+        self.root.geometry("1000x850")
+        self.root.configure(bg="#f0f0f0")
+        
+        # Create LLM chains
+        self.code_to_text_chain = self._create_code_to_text_chain()
+        self.text_to_code_chain = self._create_text_to_code_chain()
+        
+        self._setup_ui()
+        
+    def _create_code_to_text_chain(self):
+        """Create LLM chain for code to natural language conversion"""
+        llm = Ollama(model=MODEL_NAME, base_url=API_BASE)
+        
+        template = """/no_think You are a professional Playwright code interpreter. Translate Playwright scripts to concise natural language instructions.
+- Infer operation intent from all steps
+- Include element locators (text/content) for precision
+- Output only operational descriptions, no markdown/notes
+INPUT: Playwright code (JavaScript/Python)
+OUTPUT: Step-by-step natural language instructions"""
+        
+        system_message_prompt = SystemMessagePromptTemplate.from_template(template)
+        human_template = "{text}"
+        human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
+        
+        chat_prompt = ChatPromptTemplate.from_messages([system_message_prompt, human_message_prompt])
+        return LLMChain(llm=llm, prompt=chat_prompt)
+    
+    def _create_text_to_code_chain(self):
+        """Create LLM chain for natural language to code conversion"""
+        llm = Ollama(model=MODEL_NAME, base_url=API_BASE)
+        
+        template = """/no_think You are a Playwright code generator. Convert natural language to valid JavaScript code.
+- Output pure code with no explanations
+- Include necessary imports (e.g., @playwright/test)
+- Wrap in test function with page parameter
+- Use data-test selectors when possible
+INPUT: Step-by-step natural language instructions
+OUTPUT: Playwright test code (JavaScript)"""
+        
+        system_message_prompt = SystemMessagePromptTemplate.from_template(template)
+        human_template = "{text}"
+        human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
+        
+        chat_prompt = ChatPromptTemplate.from_messages([system_message_prompt, human_message_prompt])
+        return LLMChain(llm=llm, prompt=chat_prompt)
+    
+    def _setup_ui(self):
+        """Set up the user interface"""
+        # Create title
+        title_label = tk.Label(self.root, text="Playwright Code Interpreter", font=("Arial", 16, "bold"), bg="#f0f0f0")
+        title_label.pack(pady=20)
+        
+        # Create main frame
+        main_frame = tk.Frame(self.root, bg="#f0f0f0")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Code input frame
+        code_input_frame = tk.LabelFrame(main_frame, text="Playwright Code Input", font=("Arial", 12), bg="#f0f0f0")
+        code_input_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.code_input = scrolledtext.ScrolledText(code_input_frame, wrap=tk.WORD, width=80, height=10, font=("Consolas", 10))
+        self.code_input.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        
+        # Natural language frame
+        nl_frame = tk.LabelFrame(main_frame, text="Natural Language Description", font=("Arial", 12), bg="#f0f0f0")
+        nl_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.natural_language = scrolledtext.ScrolledText(nl_frame, wrap=tk.WORD, width=80, height=8, font=("Arial", 10))
+        self.natural_language.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        
+        # Code output frame
+        code_output_frame = tk.LabelFrame(main_frame, text="Playwright Code Output", font=("Arial", 12), bg="#f0f0f0")
+        code_output_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.code_output = scrolledtext.ScrolledText(code_output_frame, wrap=tk.WORD, width=80, height=10, font=("Consolas", 10))
+        self.code_output.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        
+        # Button frame
+        button_frame = tk.Frame(self.root, bg="#f0f0f0")
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        # Code to text button
+        self.code_to_text_btn = tk.Button(button_frame, text="Code → Natural Language", command=self._convert_code_to_text,
+                                         bg="#4CAF50", fg="white", font=("Arial", 10, "bold"))
+        self.code_to_text_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Text to code button
+        self.text_to_code_btn = tk.Button(button_frame, text="Natural Language → Code", command=self._convert_text_to_code,
+                                         bg="#2196F3", fg="white", font=("Arial", 10, "bold"))
+        self.text_to_code_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Execute code button
+        self.execute_btn = tk.Button(button_frame, text="Execute Code", command=self._execute_code,
+                                    bg="#f44336", fg="white", font=("Arial", 10, "bold"))
+        self.execute_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Load example button
+        self.example_btn = tk.Button(button_frame, text="Load Example", command=self._load_example,
+                                    bg="#FFC107", fg="black", font=("Arial", 10, "bold"))
+        self.example_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Clear all button
+        self.clear_btn = tk.Button(button_frame, text="Clear All", command=self._clear_all,
+                                  bg="#607D8B", fg="white", font=("Arial", 10, "bold"))
+        self.clear_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Execution result frame
+        result_frame = tk.LabelFrame(self.root, text="Execution Result", font=("Arial", 12), bg="#f0f0f0")
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=20)
+        
+        self.result_output = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, width=80, height=5, font=("Consolas", 10))
+        self.result_output.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        
+        # Status bar
+        self.status_bar = tk.Label(self.root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+    
+    def _convert_code_to_text(self):
+        """Convert Playwright code to natural language"""
+        code = self.code_input.get("1.0", tk.END).strip()
+        if not code:
+            messagebox.showwarning("Warning", "Please enter Playwright code")
+            return
+        
+        try:
+            self.status_bar.config(text="Converting code to natural language...")
+            self.root.update()
+            
+            result = self.code_to_text_chain.run(text=code)
+            
+            self.natural_language.delete("1.0", tk.END)
+            self.natural_language.insert(tk.END, result)
+            self.status_bar.config(text="Conversion completed")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error during conversion: {str(e)}")
+            self.status_bar.config(text="Ready")
+    
+    def _convert_text_to_code(self):
+        """Convert natural language description to Playwright code"""
+        text = self.natural_language.get("1.0", tk.END).strip()
+        if not text:
+            messagebox.showwarning("Warning", "Please enter a natural language description")
+            return
+        
+        try:
+            self.status_bar.config(text="Generating Playwright code...")
+            self.root.update()
+            
+            result = self.text_to_code_chain.run(text=text)
+            
+            # Cleanse output: remove leading/trailing markdown and empty lines
+            cleaned_code = self._cleanse_code_output(result)
+            
+            self.code_output.delete("1.0", tk.END)
+            self.code_output.insert(tk.END, cleaned_code)
+            self.status_bar.config(text="Code generation completed")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error generating code: {str(e)}")
+            self.status_bar.config(text="Ready")
+    
+    def _cleanse_code_output(self, code):
+        """Remove irrelevant context from LLM output"""
+        # Remove common LLM response prefixes
+        prefixes = ["```javascript", "```", "javascript", "// Code:", "// Output:"]
+        for prefix in prefixes:
+            if code.startswith(prefix):
+                code = code[len(prefix):].lstrip()
+        
+        # Remove common suffixes
+        if code.endswith("```"):
+            code = code[:-3].rstrip()
+        
+        # Remove empty leading/trailing lines
+        return "\n".join([line for line in code.split("\n") if line.strip()])
+    
+    def _execute_code(self):
+        """Execute Playwright code with improved path handling"""
+        code = self.code_output.get("1.0", tk.END).strip()
+        if not code:
+            messagebox.showwarning("Warning", "Please generate Playwright code first")
+            return
+        
+        try:
+            # Create temporary file in system temp directory
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.spec.js', delete=False, encoding='utf-8') as f:
+                f.write(code)
+                temp_file_path = f.name
+            
+            self.status_bar.config(text="Executing code...")
+            self.root.update()
+            
+            # Clear output
+            self.result_output.delete("1.0", tk.END)
+            
+            # Execute command with platform-specific handling
+            self._run_command(temp_file_path)
+            
+            self.status_bar.config(text="Execution completed")
+        except Exception as e:
+            messagebox.showerror("Execution Error", f"Failed to execute code: {str(e)}")
+            self.status_bar.config(text="Execution failed")
+        finally:
+            # Clean up temporary file
+            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+    
+    def _run_command(self, file_path):
+        """Run Playwright test command with platform compatibility"""
+        # Determine command based on OS
+        if sys.platform.startswith('win'):
+            # Windows: try npx in default installation path
+            commands = [
+                ["npx", "playwright", "test", file_path, "--headed"],
+                ["C:\\Program Files\\nodejs\\npx.cmd", "playwright", "test", file_path, "--headed"],
+                ["C:\\Program Files (x86)\\nodejs\\npx.cmd", "playwright", "test", file_path, "--headed"]
+            ]
+        else:
+            # macOS/Linux
+            commands = [["npx", "playwright", "test", file_path, "--headed"]]
+        
+        # Try each command until one works
+        last_error = None
+        for cmd in commands:
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = json.load(f)
-                    source = content.get("source")
-                    qa_pairs = content.get("qa_pairs", [])
-                    for qa_pair in qa_pairs:
-                        qa_pair["source"] = source
-                        qa_pairs_with_source.append(qa_pair)
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                
+                if result.returncode == 0:
+                    self.result_output.insert(tk.END, "Execution successful!\n\nStandard output:\n" + result.stdout)
+                    return
+                else:
+                    last_error = f"Execution failed (return code: {result.returncode})\n\n" \
+                               f"Standard output:\n{result.stdout}\n\n" \
+                               f"Error output:\n{result.stderr}"
+            except subprocess.TimeoutExpired:
+                last_error = "Execution timed out (exceeded 120 seconds)"
+            except FileNotFoundError:
+                last_error = f"Command not found: {cmd[0]}. Please ensure Node.js and Playwright are installed."
             except Exception as e:
-                print(f"Error loading {file_path}: {e}")
-    return qa_pairs_with_source
+                last_error = f"Unexpected error: {str(e)}"
+        
+        # If all commands failed, display the last error
+        self.result_output.insert(tk.END, last_error)
+    
+    def _load_example(self):
+        """Load example data"""
+        # Clear all fields
+        self._clear_all()
+        
+        # Load code example
+        example_code = """import { test, expect } from '@playwright/test';
+test('test', async ({ page }) => {
+    await page.goto('https://www.saucedemo.com/');
+    await page.locator('[data-test="username"]').click();
+    await page.locator('[data-test="username"]').fill('standard_user');
+    await page.locator('[data-test="password"]').click();
+    await page.locator('[data-test="password"]').fill('secret_sauce');
+    await page.locator('[data-test="login-button"]').click();
+    await page.locator('[data-test="item-1-title-link"]').click();
+    await page.locator('[data-test="add-to-cart"]').click();
+    await page.locator('[data-test="shopping-cart-link"]').click();
+    await page.locator('[data-test="remove-sauce-labs-bolt-t-shirt"]').click();
+    await page.locator('[data-test="continue-shopping"]').click();
+    await page.getByRole('button', { name: 'Open Menu' }).click();
+    await page.locator('[data-test="logout-sidebar-link"]').click();
+});"""
+        
+        self.code_input.insert(tk.END, example_code)
+        self.status_bar.config(text="Example data loaded")
+    
+    def _clear_all(self):
+        """Clear all text areas"""
+        self.code_input.delete("1.0", tk.END)
+        self.natural_language.delete("1.0", tk.END)
+        self.code_output.delete("1.0", tk.END)
+        self.result_output.delete("1.0", tk.END)
+        self.status_bar.config(text="Ready")
 
-# Directly specify the path to your dataset
-individual_qa_directory = "/path/to/zhangyu/qa_dataset"
-individual_qa_pairs = load_individual_qa_files(individual_qa_directory)
-
-# Debugging: Check if data is loaded correctly
-if not individual_qa_pairs:
-    raise ValueError("No QA pairs found in the specified directory.")
-
-print(f"Loaded {len(individual_qa_pairs)} QA pairs")
-
-# Split data into training and evaluation sets
-try:
-    train_qa_pairs, eval_qa_pairs = train_test_split(individual_qa_pairs, test_size=0.2, random_state=42)
-except ValueError as e:
-    print(f"Error during train_test_split: {e}")
-    raise
-
-# Prepare training dataset
-train_anchor, train_positive = [], []
-for i, pair in enumerate(train_qa_pairs):
-    train_anchor.append(pair["question"])
-    train_positive.append(pair["answer"])
-
-train_dataset = Dataset.from_dict({"positive": train_positive, "anchor": train_anchor})
-
-print(train_dataset)
-print(train_dataset[0:5])
-
-# Prepare evaluation dataset
-eval_corpus = {f"d{i}": {"text": pair["answer"]} for i, pair in enumerate(eval_qa_pairs)}
-eval_queries = {f"q{i}": pair["question"] for i, pair in enumerate(eval_qa_pairs)}
-
-# Create relevant_docs mapping for evaluation set
-eval_relevant_docs = {}
-for i in range(len(eval_qa_pairs)):
-    q_id = f"q{i}"
-    d_id = f"d{i}"
-    eval_relevant_docs[q_id] = [d_id]
-
-# Load a model
-model_name = 'bge-base-zh-v1.5'
-# 替换成自己的模型完整路径或使用huggingface model id
-model_path = "/path/to/models/bge-base-zh-v1.5"
-model = SentenceTransformer(model_path, device="cuda:0" if torch.cuda.is_available() else "cpu")
-print("Model loaded")
-
-# Evaluate the model before fine-tuning
-evaluator_before_ft = InformationRetrievalEvaluator(
-    queries=eval_queries,
-    corpus=eval_corpus,
-    relevant_docs=eval_relevant_docs,
-    name=f"{model_name}_before_ft",
-    score_functions={"cosine": cos_sim}
-)
-
-s_time_before_ft = time.time()
-result_before_ft = evaluator_before_ft(model)
-pprint(result_before_ft)
-print(f"Evaluation time before fine-tuning: {time.time() - s_time_before_ft:.2f}s")
-
-# Define loss function
-train_loss = MultipleNegativesRankingLoss(model)
-
-# Define training arguments
-args = SentenceTransformerTrainingArguments(
-    output_dir=f"/path/to/ft_{model_name}",  # output directory and hugging face model ID
-    num_train_epochs=5,  # number of epochs
-    per_device_train_batch_size=2,  # train batch size
-    gradient_accumulation_steps=2,  # for a global batch size of 512
-    per_device_eval_batch_size=4,  # evaluation batch size
-    warmup_ratio=0.1,  # warmup ratio
-    learning_rate=2e-5,  # learning rate, 2e-5 is a good value
-    lr_scheduler_type="cosine",  # use constant learning rate scheduler
-    optim="adamw_torch_fused",  # use fused adamw optimizer
-    tf32=True,  # use tf32 precision
-    bf16=True,  # use bf16 precision
-    batch_sampler=BatchSamplers.NO_DUPLICATES,
-    eval_strategy="epoch",  # evaluate after each epoch
-    save_strategy="epoch",  # save after each epoch
-    logging_steps=10,  # log every 10 steps
-    save_total_limit=3,  # save only the last 3 models
-    load_best_model_at_end=True,  # load the best model when training ends
-    metric_for_best_model=f"eval_{model_name}_cosine_ndcg@10",  # Optimizing for the best ndcg@10 score
-)
-
-# Train the model
-trainer = SentenceTransformerTrainer(
-    model=model,  # the model to train
-    args=args,  # training arguments
-    train_dataset=train_dataset.select_columns(["positive", "anchor"]),  # training dataset
-    loss=train_loss,
-    evaluator=evaluator_before_ft  # Use the same evaluator for consistency
-)
-
-trainer.train()
-
-# Save the fine-tuned model
-fine_tuned_model_path = f"/path/to/models/ft_{model_name}"
-trainer.save_model(output_dir=fine_tuned_model_path)
-print(f"Fine-tuned model saved to {fine_tuned_model_path}")
-
-# Reload the fine-tuned model for evaluation
-fine_tuned_model = SentenceTransformer(fine_tuned_model_path, device="cuda:0" if torch.cuda.is_available() else "cpu")
-print("Fine-tuned model loaded")
-
-# Evaluate the fine-tuned model
-evaluator_after_ft = InformationRetrievalEvaluator(
-    queries=eval_queries,
-    corpus=eval_corpus,
-    relevant_docs=eval_relevant_docs,
-    name=f"{model_name}_after_ft",
-    score_functions={"cosine": cos_sim}
-)
-
-s_time_after_ft = time.time()
-result_after_ft = evaluator_after_ft(fine_tuned_model)
-pprint(result_after_ft)
-print(f"Evaluation time after fine-tuning: {time.time() - s_time_after_ft:.2f}s")
-
-print(f"Total cost time: {time.time() - start_time:.2f}s")
-
-
-
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = PlaywrightCodeInterpreter(root)
+    root.mainloop()
