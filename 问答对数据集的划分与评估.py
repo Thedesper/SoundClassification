@@ -588,6 +588,24 @@ class PlaywrightCodeInterpreter:
         
         self.status_bar.config(text="Execution completed")
     
+    def _run_command(self, file_path):
+        """直接用python命令执行生成的py文件"""
+        import subprocess
+        try:
+            result = subprocess.run([
+                "python", file_path
+            ], capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                self.result_output.insert(tk.END, "执行成功！\n\n标准输出:\n" + result.stdout)
+            else:
+                self.result_output.insert(tk.END, f"执行失败 (返回码: {result.returncode})\n\n标准输出:\n{result.stdout}\n\n错误输出:\n{result.stderr}")
+        except subprocess.TimeoutExpired:
+            self.result_output.insert(tk.END, "执行超时 (超过120秒)")
+        except FileNotFoundError:
+            self.result_output.insert(tk.END, "未找到python命令，请确保已正确安装Python环境")
+        except Exception as e:
+            self.result_output.insert(tk.END, f"执行异常: {str(e)}")
+    
     def _load_example(self):
         """Load example data"""
         # Clear all fields
