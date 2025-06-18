@@ -79,7 +79,7 @@ class PlaywrightCodeInterpreter:
         return LLMChain(llm=llm, prompt=chat_prompt)
     
     def _create_text_to_code_chain(self):
-        """Create LLM chain for natural language to code conversion"""
+        """Create LLM chain for natural language to code conversion (with robustness enhancements)"""
         llm = Ollama(
             model=self.config["model_name"].get(),
             base_url=self.config["api_base"].get(),
@@ -87,32 +87,67 @@ class PlaywrightCodeInterpreter:
         )
         
         template = """
-        You are a professional Playwright code generator. Convert natural language to valid Python code.
-        
-        Important guidelines:
-        1. Output pure Python code with no explanations or comments
-        2. Include necessary imports: from playwright.sync_api import sync_playwright
-        3. Wrap code in a run(playwright) function
-        4. Use proper indentation (4 spaces)
-        5. Add error handling where appropriate
-        6. Use expect assertions for validations
-        7. Include context and browser cleanup
+        You are a professional Playwright code generator. Convert natural language to robust Python automation code with the following guidelines:
+
+        ### 鲁棒性要求 (Robustness Requirements):
+        1. **生命周期管理**：仅在所有操作完成后调用`context.close()`和`browser.close()`，避免过早关闭
+        2. **等待策略**：
+           - 使用`wait_for_load_state("networkidle")`确保页面完全加载
+           - 对关键元素添加`wait_for_selector(state="visible")`显式等待
+           - 对异步操作使用`expect`断言验证元素状态
+        3. **定位策略**：
+           - 优先使用`get_by_text`、`get_by_role`、`get_by_label`等语义化选择器
+           - 避免依赖`first`、`nth`等索引定位，改用唯一标识
+           - 对动态元素使用`data-test`属性或明确文本内容
+        4. **异步处理**：
+           - 识别并处理页面模态框、加载指示器
+           - 对AJAX内容使用`wait_for_load_state`或自定义等待
+           - 使用`try-except`块处理元素不存在异常
+        5. **代码结构**：
+           - 包含必要导入：`from playwright.sync_api import sync_playwright, expect`
+           - 封装在`run(playwright)`函数中
+           - 添加注释说明关键步骤
+        6. **执行优化**：
+           - 添加`slow_mo=200`参数便于调试
+           - 关键操作后添加合理等待
+           - 最后添加`time.sleep(5)`延迟关闭浏览器
         
         Example input:
-        "Go to https://example.com and click the 'Submit' button"
+        "访问网站，登录系统，添加商品到购物车"
         
         Example output:
+        from playwright.sync_api import sync_playwright, expect
+        import time
+
         def run(playwright):
-            browser = playwright.chromium.launch(headless=False)
+            browser = playwright.chromium.launch(headless=False, slow_mo=200)
             context = browser.new_context()
             page = context.new_page()
-            page.goto("https://example.com")
-            page.get_by_text("Submit").click()
+            
+            # 导航到网站并等待加载
+            page.goto("https://example.com", wait_until="networkidle")
+            
+            # 登录系统
+            page.get_by_label("Username").fill("user")
+            page.get_by_label("Password").fill("pass")
+            page.get_by_text("Login").click()
+            page.wait_for_selector("text=Dashboard", state="visible")
+            
+            # 添加商品到购物车
+            page.get_by_text("Products").click()
+            page.get_by_text("Add to Cart").first.click()
+            page.get_by_role("link", name="Cart").click()
+            
+            # 延迟关闭以便观察
+            time.sleep(5)
             context.close()
             browser.close()
+
+        with sync_playwright() as playwright:
+            run(playwright)
         
         INPUT: {text}
-        OUTPUT: Playwright test code (Python)
+        OUTPUT: 鲁棒的Playwright自动化测试代码（Python）
         """
         
         system_message_prompt = SystemMessagePromptTemplate.from_template(template)
@@ -169,7 +204,7 @@ class PlaywrightCodeInterpreter:
         self.code_input.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
         
         # Natural language input
-        nl_frame = ttk.LabelFrame(input_frame, text="Natural Language Description")
+        nl_frame = ttk.LabelFrame(input_frame, text="Natural Language Description (with robustness requirements)")
         nl_frame.pack(fill=tk.BOTH, expand=True, side=tk.RIGHT, padx=(5, 0), pady=5)
         
         self.natural_language = scrolledtext.ScrolledText(
@@ -196,7 +231,7 @@ class PlaywrightCodeInterpreter:
         
         self.text_to_code_btn = ttk.Button(
             button_frame, 
-            text="Natural Language → Code", 
+            text="Natural Language → Robust Code", 
             command=self._convert_text_to_code,
             style="Accent.TButton"
         )
@@ -220,7 +255,7 @@ class PlaywrightCodeInterpreter:
         
         self.load_example_btn = ttk.Button(
             button_frame, 
-            text="Load Example", 
+            text="Load Robust Example", 
             command=self._load_example,
             style="Accent.TButton"
         )
@@ -235,7 +270,7 @@ class PlaywrightCodeInterpreter:
         self.clear_all_btn.pack(side=tk.LEFT, padx=5)
         
         # Code output frame
-        output_frame = ttk.LabelFrame(workspace_frame, text="Playwright Code Output")
+        output_frame = ttk.LabelFrame(workspace_frame, text="Playwright Code Output (robust version)")
         output_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
         self.code_output = scrolledtext.ScrolledText(
@@ -274,7 +309,7 @@ class PlaywrightCodeInterpreter:
     
     def _setup_config_panel(self):
         """Set up configuration panel"""
-        config_frame = ttk.LabelFrame(self.root, text="Configuration")
+        config_frame = ttk.LabelFrame(self.root, text="LLM & Playwright Configuration")
         config_frame.pack(fill=tk.X, padx=20, pady=5)
         
         # First row of configuration
@@ -331,14 +366,14 @@ class PlaywrightCodeInterpreter:
             self.status_bar.config(text="Ready")
     
     def _convert_text_to_code(self):
-        """Convert natural language description to Playwright code"""
+        """Convert natural language description to robust Playwright code"""
         text = self.natural_language.get("1.0", tk.END).strip()
         if not text:
             messagebox.showwarning("Warning", "Please enter a natural language description")
             return
         
         try:
-            self.status_bar.config(text="Generating Playwright code...")
+            self.status_bar.config(text="Generating robust Playwright code...")
             self.root.update()
             
             result = self.text_to_code_chain.run(text=text)
@@ -353,7 +388,7 @@ class PlaywrightCodeInterpreter:
             
             self.code_output.delete("1.0", tk.END)
             self.code_output.insert(tk.END, cleaned_code)
-            self.status_bar.config(text="Code generation completed")
+            self.status_bar.config(text="Robust code generation completed")
         except TimeoutError:
             messagebox.showerror("Timeout", "LLM took too long to respond. Please try again.")
             self.status_bar.config(text="Ready")
@@ -382,7 +417,7 @@ class PlaywrightCodeInterpreter:
         
         # Ensure necessary imports are included
         if "from playwright.sync_api import" not in code:
-            code = "from playwright.sync_api import sync_playwright\n\n" + code
+            code = "from playwright.sync_api import sync_playwright, expect\nimport time\n\n" + code
         
         # Ensure there's a with statement to call the run function
         if "with sync_playwright() as playwright:" not in code:
@@ -588,77 +623,100 @@ class PlaywrightCodeInterpreter:
         
         self.status_bar.config(text="Execution completed")
     
-    def _run_command(self, file_path):
-        """直接用python命令执行生成的py文件"""
-        import subprocess
-        try:
-            result = subprocess.run([
-                "python", file_path
-            ], capture_output=True, text=True, timeout=120)
-            if result.returncode == 0:
-                self.result_output.insert(tk.END, "执行成功！\n\n标准输出:\n" + result.stdout)
-            else:
-                self.result_output.insert(tk.END, f"执行失败 (返回码: {result.returncode})\n\n标准输出:\n{result.stdout}\n\n错误输出:\n{result.stderr}")
-        except subprocess.TimeoutExpired:
-            self.result_output.insert(tk.END, "执行超时 (超过120秒)")
-        except FileNotFoundError:
-            self.result_output.insert(tk.END, "未找到python命令，请确保已正确安装Python环境")
-        except Exception as e:
-            self.result_output.insert(tk.END, f"执行异常: {str(e)}")
-    
     def _load_example(self):
-        """Load example data"""
+        """Load robust example data"""
         # Clear all fields
         self._clear_all()
         
-        # Load Python Playwright example
+        # Load Python Playwright example with robustness features
         example_code = """from playwright.sync_api import sync_playwright, expect
+import time
 
 def run(playwright):
-    browser = playwright.chromium.launch(headless=False)
+    # 启动浏览器（添加slow_mo便于观察，非无头模式）
+    browser = playwright.chromium.launch(headless=False, slow_mo=200)
     context = browser.new_context()
     page = context.new_page()
     
-    # Open website
-    page.goto('https://www.saucedemo.com/')
+    # 导航到页面并等待完全加载
+    page.goto("https://163.184.132.77/liveops/jobs", wait_until="networkidle")
     
-    # Login
-    page.locator('[data-test="username"]').fill('standard_user')
-    page.locator('[data-test="password"]').fill('secret_sauce')
-    page.locator('[data-test="login-button"]').click()
+    # 创建新Job（使用语义化选择器）
+    create_job_btn = page.get_by_text("Create New Job")
+    expect(create_job_btn).to_be_visible()
+    create_job_btn.click()
     
-    # Verify login success
-    expect(page.locator('[data-test="title"]')).to_have_text('Products')
+    page.get_by_label("Job Name").fill("test123")
+    page.get_by_text("Create New Job", exact=True).click()
     
-    # Add item to cart
-    page.locator('[data-test="add-to-cart-sauce-labs-backpack"]').click()
+    # 等待Job创建完成
+    page.wait_for_selector("text=test123", state="visible", timeout=5000)
+    page.get_by_text("test123").click()
     
-    # View cart
-    page.locator('[data-test="shopping-cart-link"]').click()
+    # 填写FDP Activity ID
+    fdp_activity_id = page.get_by_label("FDP Activity ID")
+    fdp_activity_id.click()
+    fdp_activity_id.dblclick()  # 双击选择现有内容
     
-    # Checkout
-    page.locator('[data-test="checkout"]').click()
+    # 选择Rig Type（添加等待和断言）
+    rig_type_selector = page.locator("mat-grid-list").get_by_role("link", name="Rig Typearrow_drop_downRig")
+    expect(rig_type_selector).to_be_visible()
+    rig_type_selector.click()
     
-    # Fill in information
-    page.locator('[data-test="firstName"]').fill('John')
-    page.locator('[data-test="lastName"]').fill('Doe')
-    page.locator('[data-test="postalCode"]').fill('12345')
-    page.locator('[data-test="continue"]').click()
+    page.get_by_text("Jack Up").click()
+    page.get_by_text("Save").click()
+    page.wait_for_load_state("networkidle")  # 等待保存完成
     
-    # Complete order
-    page.locator('[data-test="finish"]').click()
+    # 导航到Well Design
+    well_design = page.locator("#expanded-side-nav").get_by_text("Well Design")
+    expect(well_design).to_be_visible()
+    well_design.click()
+    page.wait_for_load_state("networkidle")
     
-    # Verify order completion
-    expect(page.locator('.complete-header')).to_have_text('Thank you for your order!')
+    # 填写Well Design参数
+    page.get_by_text("8.5").click()
+    page.get_by_label("Input Editor").fill("12.25")
     
-    # Logout
-    page.get_by_role('button', name='Open Menu').click()
-    page.locator('[data-test="logout-sidebar-link"]').click()
+    # 处理第二个输入框（使用更稳定的选择器）
+    input_selector = page.locator("span:has-text('50000')").first.locator("..")
+    expect(input_selector).to_be_clickable()
+    input_selector.click()
+    page.get_by_label("Input Editor").fill("2000")
     
-    # Verify logout
-    expect(page.locator('[data-test="login-button"]')).to_be_visible()
+    # 保存Well Design
+    page.get_by_text("Save").click()
+    page.wait_for_load_state("networkidle")
     
-    # Close browser
+    # 导航到Run Manager
+    run_manager = page.locator("#expanded-side-nav").get_by_text("Run Manager")
+    expect(run_manager).to_be_visible()
+    run_manager.click()
+    page.wait_for_load_state("networkidle")
+    
+    # 添加Run
+    page.get_by_text("Add Run").click()
+    page.get_by_label("Run Name").fill("ts1")
+    page.get_by_text("Add Run").click()
+    page.wait_for_selector("text=ts1", state="visible", timeout=5000)
+    
+    # 添加工具（使用try-except处理可能的异常）
+    try:
+        page.get_by_text("Add New Tool").click()
+        page.get_by_label("Enter").fill("leh-qt")
+        page.get_by_text("LEH-QT").click()
+        
+        # 使用更明确的选择器代替索引
+        page.locator("#toollist").get_by_role("button", name="Add another tool").click()
+        
+        page.get_by_label("Enter").fill("edtc-b")
+        page.get_by_text("EDTC-B").click()
+    except Exception as e:
+        print(f"工具添加异常: {e}")
+    
+    # 延迟关闭浏览器，便于观察结果
+    time.sleep(5)  # 暂停5秒
+    
+    # 关闭浏览器（最后执行）
     context.close()
     browser.close()
 
@@ -667,7 +725,7 @@ with sync_playwright() as playwright:
 """
         
         self.code_input.insert(tk.END, example_code)
-        self.status_bar.config(text="Example data loaded (Python Playwright)")
+        self.status_bar.config(text="Robust example data loaded (with wait strategies and assertions)")
     
     def _clear_all(self):
         """Clear all text areas"""
