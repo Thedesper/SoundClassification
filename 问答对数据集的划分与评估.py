@@ -36,7 +36,7 @@ class PlaywrightCodeInterpreter:
         if 'clam' in self.style.theme_names():
             self.style.theme_use('clam')
         
-        # Create LLM chains
+        # Create LLM chains with enhanced prompt
         self.code_to_text_chain = self._create_code_to_text_chain()
         self.text_to_code_chain = self._create_text_to_code_chain()
         
@@ -79,7 +79,7 @@ class PlaywrightCodeInterpreter:
         return LLMChain(llm=llm, prompt=chat_prompt)
     
     def _create_text_to_code_chain(self):
-        """Create LLM chain for natural language to code conversion (with robustness enhancements)"""
+        """Create LLM chain for natural language to code conversion with robust error handling"""
         llm = Ollama(
             model=self.config["model_name"].get(),
             base_url=self.config["api_base"].get(),
@@ -89,65 +89,126 @@ class PlaywrightCodeInterpreter:
         template = """
         /no_think You are a professional Playwright code generator. Convert natural language to robust Python automation code with the following guidelines:
 
-        ### Robustness Requirements:
-        1. **Lifecycle Management**: Only call `context.close()` and `browser.close()` after all operations are completed to avoid premature closure
-        2. **Waiting Strategies**:
-           - Use `wait_for_load_state("networkidle")` to ensure the page is fully loaded
-           - Add `wait_for_selector(state="visible")` explicit waits for key elements
-           - Use `expect` assertions to verify element states for asynchronous operations
-        3. **Location Strategies**:
-           - Prioritize semantic selectors like `get_by_text`, `get_by_role`, `get_by_label`
-           - Avoid relying on indexes like `first`, `nth`; use unique identifiers instead
-           - Use `data-test` attributes or explicit text content for dynamic elements
-        4. **Asynchronous Handling**:
-           - Identify and handle page modals and loading indicators
-           - Use `wait_for_load_state` or custom waits for AJAX content
-           - Use `try-except` blocks to handle element not found exceptions
-        5. **Code Structure**:
-           - Include necessary imports: `from playwright.sync_api import sync_playwright, expect`
-           - Enclose in a `run(playwright)` function
-           - Add comments to explain key steps
-        6. **Execution Optimization**:
-           - Add `slow_mo=200` parameter for debugging convenience
-           - Add reasonable waits after key operations
-           - Add a final `time.sleep(5)` delay before closing the browser
+        ### Robustness & Error Handling Requirements:
+        1. **Lifecycle Management**:
+           - Enclose all operations in try-finally to ensure browser closure
+           - Add `input("Press Enter to close...")` before closing for manual inspection
+           - Never call `context.close()` or `browser.close()` prematurely
         
-        Example input:
-        "Visit the website, log in to the system, add items to the shopping cart"
+        2. **Error Handling**:
+           - Wrap every critical action (click/fill/navigate) in try-except blocks
+           - Log errors with timestamps and context (e.g., `print(f"Error at step X: {e}")`)
+           - Capture screenshots on error: `page.screenshot(path="error-stepX.png")`
+           - Use specific exceptions (TimeoutError, ElementNotFoundError) when possible
         
-        Example output:
+        3. **Element Validation**:
+           - Always validate elements before interaction:
+             `expect(element).to_be_visible()`, `expect(element).to_be_enabled()`
+           - Use explicit waits with states: `wait_for_selector(state="visible", timeout=10000)`
+           - Prefer element-based waits over `time.sleep()`
+        
+        4. **Locator Best Practices**:
+           - Prioritize semantic selectors: `get_by_text`, `get_by_role`, `get_by_label`
+           - Use `exact=True` for text selectors when ambiguity exists
+           - Avoid index-based selectors (.first, .nth) unless necessary
+           - Prefer unique attributes: `data-test`, `id`, `name`
+        
+        5. **Debugging Aids**:
+           - Set `slow_mo=200` for step-by-step visualization
+           - Add print statements at key milestones (e.g., `print("Step X completed")`)
+           - Include conditional `time.sleep()` for manual inspection
+           - Use `page.pause()` for browser-side debugging
+        
+        ### Critical Operation Example (Create New Job):
+        ```python
+        try:
+            # Locate and validate button with explicit wait
+            create_btn = page.get_by_text("Create New Job", exact=True)
+            page.wait_for_selector(create_btn, state="visible", timeout=10000)
+            expect(create_btn).to_be_enabled()
+            create_btn.click()
+            print("Create New Job button clicked")
+            
+            # Wait for next page element to load
+            page.wait_for_selector("label:has-text('Job Name')", state="visible")
+        except Exception as e:
+            print(f"Error in job creation step: {e}")
+            page.screenshot(path="job_creation_error.png")
+            time.sleep(15)  # Pause for manual debug
+            raise
+        ```
+        
+        ### Example Input:
+        "Create a new job, navigate to well design, and add tools robustly"
+        
+        ### Example Output:
+        ```python
         from playwright.sync_api import sync_playwright, expect
         import time
 
         def run(playwright):
+            # Launch browser with debugging options
             browser = playwright.chromium.launch(headless=False, slow_mo=200)
-            context = browser.new_context(ignore_https_errors=True)
+            context = browser.new_context()
             page = context.new_page()
             
-            # Navigate to the website and wait for loading
-            page.goto("https://example.com", wait_until="networkidle")
-            
-            # Log in to the system
-            page.get_by_label("Username").fill("user")
-            page.get_by_label("Password").fill("pass")
-            page.get_by_text("Login").click()
-            page.wait_for_selector("text=Dashboard", state="visible")
-            
-            # Add items to the shopping cart
-            page.get_by_text("Products").click()
-            page.get_by_text("Add to Cart").first.click()
-            page.get_by_role("link", name="Cart").click()
-            
-            # Delay closure for observation
-            time.sleep(5)
-            context.close()
-            browser.close()
+            try:
+                # Navigate to jobs page with error handling
+                page.goto("https://example.com/jobs", wait_until="networkidle")
+                print("Navigated to jobs dashboard")
+                
+                # Step 1: Create New Job
+                try:
+                    create_btn = page.get_by_text("Create New Job", exact=True)
+                    expect(create_btn).to_be_visible()
+                    create_btn.click()
+                    page.wait_for_selector("label:has-text('Job Name')", state="visible")
+                    page.get_by_label("Job Name").fill("test-job-123")
+                    page.get_by_text("Create", exact=True).click()
+                    page.wait_for_selector("text=Job created", state="visible")
+                    print("Job created successfully")
+                except Exception as e:
+                    print(f"Job creation failed: {e}")
+                    page.screenshot(path="job_error.png")
+                    raise
+                
+                # Step 2: Navigate to Well Design (similar error handling)
+                try:
+                    well_design = page.locator("#nav-panel").get_by_text("Well Design")
+                    expect(well_design).to_be_clickable()
+                    well_design.click()
+                    page.wait_for_load_state("networkidle")
+                    print("Navigated to Well Design")
+                except Exception as e:
+                    print(f"Well Design navigation error: {e}")
+                    page.screenshot(path="nav_error.png")
+                    raise
+                
+                # Step 3: Add tools with try-except
+                try:
+                    page.get_by_text("Add Tool").click()
+                    page.get_by_label("Tool Name").fill("drill-bit")
+                    page.get_by_text("Save").click()
+                    print("Tool added successfully")
+                except Exception as e:
+                    print(f"Tool addition error: {e}")
+                    page.screenshot(path="tool_error.png")
+                
+            except Exception as e:
+                print(f"Test execution error: {e}")
+            finally:
+                # Pause before closing for manual review
+                print("Press Enter to close browser...")
+                input()
+                context.close()
+                browser.close()
 
         with sync_playwright() as playwright:
             run(playwright)
+        ```
         
         INPUT: {text}
-        OUTPUT: Robust Playwright automation test code (Python)
+        OUTPUT: Robust Playwright automation code with error handling (Python)
         """
         
         system_message_prompt = SystemMessagePromptTemplate.from_template(template)
@@ -158,7 +219,7 @@ class PlaywrightCodeInterpreter:
         return LLMChain(llm=llm, prompt=chat_prompt)
     
     def _setup_ui(self):
-        """Set up the user interface"""
+        """Set up the user interface with clear layouts"""
         # Create title
         title_frame = ttk.Frame(self.root)
         title_frame.pack(fill=tk.X, pady=10)
@@ -182,11 +243,11 @@ class PlaywrightCodeInterpreter:
         history_frame = ttk.Frame(main_frame)
         main_frame.add(history_frame, text="History")
         
-        # Create workspace layout
+        # Input section
         input_frame = ttk.LabelFrame(workspace_frame, text="Input")
         input_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        # Separator between code input and natural language input
+        # Code & natural language input split
         input_splitter = ttk.Frame(input_frame, height=5)
         input_splitter.pack(fill=tk.X, pady=5)
         
@@ -204,7 +265,7 @@ class PlaywrightCodeInterpreter:
         self.code_input.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
         
         # Natural language input
-        nl_frame = ttk.LabelFrame(input_frame, text="Natural Language Description (with robustness requirements)")
+        nl_frame = ttk.LabelFrame(input_frame, text="Natural Language Description (robust requirements)")
         nl_frame.pack(fill=tk.BOTH, expand=True, side=tk.RIGHT, padx=(5, 0), pady=5)
         
         self.natural_language = scrolledtext.ScrolledText(
@@ -220,7 +281,7 @@ class PlaywrightCodeInterpreter:
         button_frame = ttk.Frame(workspace_frame)
         button_frame.pack(fill=tk.X, pady=10)
         
-        # Function buttons
+        # Function buttons with clear actions
         self.code_to_text_btn = ttk.Button(
             button_frame, 
             text="Code → Natural Language", 
@@ -269,7 +330,7 @@ class PlaywrightCodeInterpreter:
         )
         self.clear_all_btn.pack(side=tk.LEFT, padx=5)
         
-        # Code output frame
+        # Output sections
         output_frame = ttk.LabelFrame(workspace_frame, text="Playwright Code Output (robust version)")
         output_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
@@ -282,7 +343,6 @@ class PlaywrightCodeInterpreter:
         )
         self.code_output.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
         
-        # Execution result frame
         result_frame = ttk.LabelFrame(workspace_frame, text="Execution Result")
         result_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
@@ -304,43 +364,39 @@ class PlaywrightCodeInterpreter:
         )
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # Configure styles
+        # Configure button styles
         self.style.configure("Accent.TButton", font=("Arial", 10, "bold"))
     
     def _setup_config_panel(self):
-        """Set up configuration panel"""
+        """Set up LLM and Playwright configuration panel"""
         config_frame = ttk.LabelFrame(self.root, text="LLM & Playwright Configuration")
         config_frame.pack(fill=tk.X, padx=20, pady=5)
         
-        # First row of configuration
+        # First row: headless mode and timeout
         row1_frame = ttk.Frame(config_frame)
         row1_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Headless mode option
         ttk.Checkbutton(
             row1_frame,
             text="Run Playwright in headless mode",
             variable=self.config["headless"]
         ).pack(side=tk.LEFT, padx=(0, 20))
         
-        # Timeout setting
         ttk.Label(row1_frame, text="LLM Timeout (seconds):").pack(side=tk.LEFT, padx=(0, 5))
         ttk.Entry(row1_frame, textvariable=self.config["timeout"], width=5).pack(side=tk.LEFT)
         
-        # Second row of configuration
+        # Second row: model and API configuration
         row2_frame = ttk.Frame(config_frame)
         row2_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Model configuration
         ttk.Label(row2_frame, text="Ollama Model:").pack(side=tk.LEFT, padx=(0, 5))
         ttk.Entry(row2_frame, textvariable=self.config["model_name"], width=30).pack(side=tk.LEFT, padx=(0, 20))
         
-        # API Base configuration
         ttk.Label(row2_frame, text="Ollama API Base:").pack(side=tk.LEFT, padx=(0, 5))
         ttk.Entry(row2_frame, textvariable=self.config["api_base"], width=40).pack(side=tk.LEFT)
     
     def _convert_code_to_text(self):
-        """Convert Playwright code to natural language"""
+        """Convert Playwright code to natural language instructions"""
         code = self.code_input.get("1.0", tk.END).strip()
         if not code:
             messagebox.showwarning("Warning", "Please enter Playwright code")
@@ -351,9 +407,9 @@ class PlaywrightCodeInterpreter:
             self.root.update()
             
             result = self.code_to_text_chain.run(text=code)
-            
             self.natural_language.delete("1.0", tk.END)
             self.natural_language.insert(tk.END, result)
+            
             self.status_bar.config(text="Conversion completed")
         except TimeoutError:
             messagebox.showerror("Timeout", "LLM took too long to respond. Please try again.")
@@ -362,11 +418,11 @@ class PlaywrightCodeInterpreter:
             messagebox.showerror("Connection Error", f"Could not connect to Ollama API at {API_BASE}")
             self.status_bar.config(text="Ready")
         except Exception as e:
-            messagebox.showerror("Error", f"Error during conversion: {str(e)}")
+            messagebox.showerror("Error", f"Conversion error: {str(e)}")
             self.status_bar.config(text="Ready")
     
     def _convert_text_to_code(self):
-        """Convert natural language description to robust Playwright code"""
+        """Convert natural language to robust Playwright code with error handling"""
         text = self.natural_language.get("1.0", tk.END).strip()
         if not text:
             messagebox.showwarning("Warning", "Please enter a natural language description")
@@ -379,7 +435,7 @@ class PlaywrightCodeInterpreter:
             result = self.text_to_code_chain.run(text=text)
             cleaned_code = self._cleanse_code_output(result)
             
-            # Apply headless mode configuration
+            # Apply headless mode if enabled
             if self.config["headless"].get():
                 cleaned_code = cleaned_code.replace(
                     "launch(headless=False)", 
@@ -390,18 +446,18 @@ class PlaywrightCodeInterpreter:
             self.code_output.insert(tk.END, cleaned_code)
             self.status_bar.config(text="Robust code generation completed")
         except TimeoutError:
-            messagebox.showerror("Timeout", "LLM took too long to respond. Please try again.")
+            messagebox.showerror("Timeout", "LLM took too long. Please try again.")
             self.status_bar.config(text="Ready")
         except ConnectionError:
-            messagebox.showerror("Connection Error", f"Could not connect to Ollama API at {self.config['api_base'].get()}")
+            messagebox.showerror("Connection Error", f"API error: {self.config['api_base'].get()}")
             self.status_bar.config(text="Ready")
         except Exception as e:
-            messagebox.showerror("Error", f"Error generating code: {str(e)}")
+            messagebox.showerror("Error", f"Code generation error: {str(e)}")
             self.status_bar.config(text="Ready")
     
     def _cleanse_code_output(self, code):
-        """Cleanse LLM output to ensure valid Python code"""
-        # Remove common LLM response prefixes and markers
+        """Cleanse LLM-generated code to ensure Python validity"""
+        # Remove common LLM response markers
         prefixes = ["```python", "```", "python", "# Code:", "# Output:"]
         for prefix in prefixes:
             if code.startswith(prefix):
@@ -410,330 +466,135 @@ class PlaywrightCodeInterpreter:
         if code.endswith("```"):
             code = code[:-3].rstrip()
         
-        # Ensure code contains necessary structure
+        # Ensure proper function structure
         if "def run(playwright):" not in code:
-            # If no run function, try to wrap code
-            code = f"def run(playwright):\n    # Generated code\n{self._indent_code(code)}\n    context.close()\n    browser.close()"
+            code = f"def run(playwright):\n    # Generated code\n{self._indent_code(code)}\n\nwith sync_playwright() as playwright:\n    run(playwright)"
         
-        # Ensure necessary imports are included
+        # Add missing imports if needed
         if "from playwright.sync_api import" not in code:
             code = "from playwright.sync_api import sync_playwright, expect\nimport time\n\n" + code
         
-        # Ensure there's a with statement to call the run function
-        if "with sync_playwright() as playwright:" not in code:
-            code += "\n\nwith sync_playwright() as playwright:\n    run(playwright)"
-        
         return code
     
-    def _indent_code(self, code, indent=4):
-        """Indent code block"""
-        lines = code.split("\n")
-        indented_lines = [" " * indent + line for line in lines]
-        return "\n".join(indented_lines)
+    def _indent_code(self, code):
+        """Indent code by 4 spaces per line"""
+        lines = code.split('\n')
+        indented_lines = ['    ' + line for line in lines]
+        return '\n'.join(indented_lines)
     
     def _format_code(self):
-        """Format code output"""
+        """Format the generated code using Python's black formatter"""
         code = self.code_output.get("1.0", tk.END).strip()
         if not code:
+            messagebox.showwarning("Warning", "No code to format")
             return
         
         try:
-            # Try to format code using black
-            result = subprocess.run(
-                ["black", "-q", "-c", code],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(code)
+                temp_filename = f.name
             
-            if result.returncode == 0:
-                formatted_code = result.stdout
-                self.code_output.delete("1.0", tk.END)
-                self.code_output.insert(tk.END, formatted_code)
-                messagebox.showinfo("Success", "Code formatted successfully!")
-            else:
-                messagebox.showerror("Formatting Error", f"Failed to format code:\n{result.stderr}")
-        except FileNotFoundError:
-            messagebox.showerror("Dependency Missing", "Please install black:\n\npip install black")
+            # Format the code using black
+            try:
+                subprocess.run(
+                    [sys.executable, '-m', 'black', '-q', temp_filename],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            except subprocess.CalledProcessError as e:
+                # If black fails, try autopep8 as fallback
+                subprocess.run(
+                    [sys.executable, '-m', 'autopep8', '--in-place', temp_filename],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            
+            # Read the formatted code
+            with open(temp_filename, 'r') as f:
+                formatted_code = f.read()
+            
+            # Update the code output
+            self.code_output.delete("1.0", tk.END)
+            self.code_output.insert(tk.END, formatted_code)
+            
+            # Clean up the temporary file
+            os.unlink(temp_filename)
+            
+            self.status_bar.config(text="Code formatted successfully")
         except Exception as e:
-            messagebox.showerror("Error", f"Error formatting code:\n{str(e)}")
+            messagebox.showerror("Error", f"Formatting error: {str(e)}")
+            self.status_bar.config(text="Ready")
     
     def _execute_code(self):
-        """Execute Playwright code"""
+        """Execute the generated Playwright code"""
         code = self.code_output.get("1.0", tk.END).strip()
         if not code:
-            messagebox.showwarning("Warning", "Please generate Playwright code first")
+            messagebox.showwarning("Warning", "No code to execute")
             return
         
-        # Check if code contains necessary Playwright imports
-        if "playwright.sync_api" not in code:
-            messagebox.showwarning("Invalid Code", "Generated code does not contain Playwright imports")
-            return
-        
-        temp_file_path = None
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(code)
-                temp_file_path = f.name
+                temp_filename = f.name
             
-            self.status_bar.config(text="Executing code...")
+            self.result_output.delete("1.0", tk.END)
+            self.result_output.insert(tk.END, "Executing code...\n")
             self.root.update()
             
-            # Clear output
-            self.result_output.delete("1.0", tk.END)
+            # Execute the code using a subprocess
+            process = subprocess.Popen(
+                [sys.executable, temp_filename],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
             
-            # Detect Python executable
-            python_executable = self._detect_python_executable()
-            if not python_executable:
-                messagebox.showerror("Python Not Found", "Could not find a valid Python installation")
-                return
+            # Capture and display the output
+            for line in iter(process.stdout.readline, ''):
+                self.result_output.insert(tk.END, line)
+                self.result_output.see(tk.END)
+                self.root.update()
             
-            # Check if Playwright is installed
-            if not self._check_playwright_installed(python_executable):
-                if messagebox.askyesno("Install Playwright", "Playwright is not installed. Install it now?"):
-                    self._install_playwright(python_executable)
-                else:
-                    self.status_bar.config(text="Ready")
-                    return
+            process.wait()
             
-            # Execute code
-            self._run_code_with_realtime_output(python_executable, temp_file_path)
+            # Clean up the temporary file
+            os.unlink(temp_filename)
             
+            self.status_bar.config(text="Code execution completed")
         except Exception as e:
-            messagebox.showerror("Execution Error", f"Failed to execute code: {str(e)}")
+            messagebox.showerror("Error", f"Execution error: {str(e)}")
             self.status_bar.config(text="Ready")
-        finally:
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-    
-    def _detect_python_executable(self):
-        """Detect available Python executable"""
-        candidates = [
-            sys.executable,
-            "python3",
-            "python",
-            "py"  # Windows Python Launcher
-        ]
-        
-        for candidate in candidates:
-            try:
-                result = subprocess.run(
-                    [candidate, "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0 and "Python" in result.stdout:
-                    return candidate
-            except:
-                continue
-        
-        return None
-    
-    def _check_playwright_installed(self, python_executable):
-        """Check if Playwright is installed"""
-        try:
-            result = subprocess.run(
-                [python_executable, "-c", "import playwright; print(playwright.__version__)"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            return result.returncode == 0
-        except:
-            return False
-    
-    def _install_playwright(self, python_executable):
-        """Install Playwright and its browsers"""
-        try:
-            self.result_output.delete("1.0", tk.END)
-            self.result_output.insert(tk.END, "Installing Playwright...\n")
-            
-            # Install Playwright library
-            install_process = subprocess.Popen(
-                [python_executable, "-m", "pip", "install", "playwright"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            
-            for line in iter(install_process.stdout.readline, ''):
-                self.result_output.insert(tk.END, line)
-                self.result_output.see(tk.END)
-                self.root.update_idletasks()
-            
-            install_process.wait()
-            
-            if install_process.returncode != 0:
-                self.result_output.insert(tk.END, "\nFailed to install Playwright library.\n")
-                return False
-            
-            # Install browsers
-            self.result_output.insert(tk.END, "\nInstalling browsers...\n")
-            
-            browser_process = subprocess.Popen(
-                [python_executable, "-m", "playwright", "install"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            
-            for line in iter(browser_process.stdout.readline, ''):
-                self.result_output.insert(tk.END, line)
-                self.result_output.see(tk.END)
-                self.root.update_idletasks()
-            
-            browser_process.wait()
-            
-            if browser_process.returncode != 0:
-                self.result_output.insert(tk.END, "\nFailed to install browsers.\n")
-                return False
-            
-            self.result_output.insert(tk.END, "\nPlaywright installed successfully!\n")
-            return True
-        except Exception as e:
-            self.result_output.insert(tk.END, f"\nError installing Playwright: {str(e)}\n")
-            return False
-    
-    def _run_code_with_realtime_output(self, python_executable, file_path):
-        """Execute code and display real-time output"""
-        process = subprocess.Popen(
-            [python_executable, file_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-        
-        # Display output in real-time
-        self.result_output.delete("1.0", tk.END)
-        for line in iter(process.stdout.readline, ''):
-            self.result_output.insert(tk.END, line)
-            self.result_output.see(tk.END)  # Auto-scroll
-            self.root.update_idletasks()  # Update UI
-        
-        process.wait()
-        
-        if process.returncode == 0:
-            self.result_output.insert(tk.END, "\n\nExecution completed successfully!")
-        else:
-            self.result_output.insert(tk.END, f"\n\nExecution failed with return code {process.returncode}")
-        
-        self.status_bar.config(text="Execution completed")
     
     def _load_example(self):
-        """Load robust example data"""
-        # Clear all fields
-        self._clear_all()
+        """Load a robust example into the input fields"""
+        example_text = """
+1. Navigate to the login page
+2. Enter username and password
+3. Click login button
+4. Wait for dashboard to load
+5. Navigate to user profile
+6. Update email address
+7. Save changes
+8. Verify success message
+        """.strip()
         
-        # Load Python Playwright example with robustness features
-        example_code = """from playwright.sync_api import sync_playwright, expect
-import time
-
-def run(playwright):
-    # Launch browser (add slow_mo for observation, non-headless mode)
-    browser = playwright.chromium.launch(headless=False, slow_mo=200)
-    context = browser.new_context()
-    page = context.new_page()
-    
-    # Navigate to the page and wait for full loading
-    page.goto("https://163.184.132.77/liveops/jobs", wait_until="networkidle")
-    
-    # Create a new Job (use semantic selector)
-    create_job_btn = page.get_by_text("Create New Job")
-    expect(create_job_btn).to_be_visible()
-    create_job_btn.click()
-    
-    page.get_by_label("Job Name").fill("test123")
-    page.get_by_text("Create New Job", exact=True).click()
-    
-    # Wait for Job creation to complete
-    page.wait_for_selector("text=test123", state="visible", timeout=5000)
-    page.get_by_text("test123").click()
-    
-    # Fill in FDP Activity ID
-    fdp_activity_id = page.get_by_label("FDP Activity ID")
-    fdp_activity_id.click()
-    fdp_activity_id.dblclick()  # Double-click to select existing content
-    
-    # Select Rig Type (add waiting and assertion)
-    rig_type_selector = page.locator("mat-grid-list").get_by_role("link", name="Rig Typearrow_drop_downRig")
-    expect(rig_type_selector).to_be_visible()
-    rig_type_selector.click()
-    
-    page.get_by_text("Jack Up").click()
-    page.get_by_text("Save").click()
-    page.wait_for_load_state("networkidle")  # Wait for saving to complete
-    
-    # Navigate to Well Design
-    well_design = page.locator("#expanded-side-nav").get_by_text("Well Design")
-    expect(well_design).to_be_visible()
-    well_design.click()
-    page.wait_for_load_state("networkidle")
-    
-    # Fill in Well Design parameters
-    page.get_by_text("8.5").click()
-    page.get_by_label("Input Editor").fill("12.25")
-    
-    # Process the second input box (use a more stable selector)
-    input_selector = page.locator("span:has-text('50000')").first.locator("..")
-    expect(input_selector).to_be_clickable()
-    input_selector.click()
-    page.get_by_label("Input Editor").fill("2000")
-    
-    # Save Well Design
-    page.get_by_text("Save").click()
-    page.wait_for_load_state("networkidle")
-    
-    # Navigate to Run Manager
-    run_manager = page.locator("#expanded-side-nav").get_by_text("Run Manager")
-    expect(run_manager).to_be_visible()
-    run_manager.click()
-    page.wait_for_load_state("networkidle")
-    
-    # Add Run
-    page.get_by_text("Add Run").click()
-    page.get_by_label("Run Name").fill("ts1")
-    page.get_by_text("Add Run").click()
-    page.wait_for_selector("text=ts1", state="visible", timeout=5000)
-    
-    # Add tools (use try-except to handle possible exceptions)
-    try:
-        page.get_by_text("Add New Tool").click()
-        page.get_by_label("Enter").fill("leh-qt")
-        page.get_by_text("LEH-QT").click()
+        self.natural_language.delete("1.0", tk.END)
+        self.natural_language.insert(tk.END, example_text)
         
-        # Use a more explicit selector instead of an index
-        page.locator("#toollist").get_by_role("button", name="Add another tool").click()
-        
-        page.get_by_label("Enter").fill("edtc-b")
-        page.get_by_text("EDTC-B").click()
-    except Exception as e:
-        print(f"Tool addition exception: {e}")
-    
-    # Delay closing the browser for result observation
-    time.sleep(5)  # Pause for 5 seconds
-    
-    # Close the browser (execute last)
-    context.close()
-    browser.close()
-
-with sync_playwright() as playwright:
-    run(playwright)
-"""
-        
-        self.code_input.insert(tk.END, example_code)
-        self.status_bar.config(text="Robust example data loaded (with wait strategies and assertions)")
+        self.status_bar.config(text="Example loaded - click 'Natural Language → Robust Code' to generate")
     
     def _clear_all(self):
-        """Clear all text areas"""
+        """Clear all input and output fields"""
         self.code_input.delete("1.0", tk.END)
         self.natural_language.delete("1.0", tk.END)
         self.code_output.delete("1.0", tk.END)
         self.result_output.delete("1.0", tk.END)
-        self.status_bar.config(text="Ready")
+        self.status_bar.config(text="All fields cleared")
 
 if __name__ == "__main__":
     root = tk.Tk()
