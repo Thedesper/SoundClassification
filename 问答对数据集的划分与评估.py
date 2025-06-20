@@ -733,18 +733,35 @@ export default defineConfig({
             print(f"Debug - Environment check error: {e}")
             return False
     
+    def _get_npm_command(self):
+        """Get npm command based on operating system"""
+        import platform
+        if platform.system() == "Windows":
+            return "npm.cmd"
+        return "npm"
+    
+    def _get_npx_command(self):
+        """Get npx command based on operating system"""
+        import platform
+        if platform.system() == "Windows":
+            return "npx.cmd"
+        return "npx"
+    
     def _install_dependencies(self):
         """Install dependencies in background"""
         try:
+            import platform
             self._log_execution("📦 Installing Node.js dependencies...")
             
             # Install dependencies
+            npm_cmd = self._get_npm_command()
             result = subprocess.run(
-                ["npm", "install"],
+                [npm_cmd, "install"],
                 cwd=self.temp_test_dir,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minutes timeout
+                timeout=300,  # 5 minutes timeout
+                shell=True if platform.system() == "Windows" else False
             )
             
             if result.returncode == 0:
@@ -752,12 +769,14 @@ export default defineConfig({
                 
                 # Install Playwright browsers
                 self._log_execution("🌐 Installing Playwright browsers...")
+                npx_cmd = self._get_npx_command()
                 browser_result = subprocess.run(
-                    ["npx", "playwright", "install", "chromium"],
+                    [npx_cmd, "playwright", "install", "chromium"],
                     cwd=self.temp_test_dir,
                     capture_output=True,
                     text=True,
-                    timeout=600  # 10 minutes timeout
+                    timeout=600,  # 10 minutes timeout
+                    shell=True if platform.system() == "Windows" else False
                 )
                 
                 if browser_result.returncode == 0:
@@ -828,18 +847,21 @@ export default defineConfig({
     def _execute_playwright_test(self, test_file):
         """Execute Playwright test"""
         try:
+            import platform
             # Set up environment variables
             test_env = os.environ.copy()
             
             # Execute test with custom report location
+            npx_cmd = self._get_npx_command()
             self.execution_process = subprocess.Popen(
-                ["npx", "playwright", "test", test_file, "--headed"],
+                [npx_cmd, "playwright", "test", test_file, "--headed"],
                 cwd=self.temp_test_dir,
                 env=test_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                universal_newlines=True
+                universal_newlines=True,
+                shell=True if platform.system() == "Windows" else False
             )
             
             # Read output in real time
