@@ -1,338 +1,274 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Midscene AI Test Code Generator
+Generate high-quality midscene + Playwright test code based on natural language descriptions
+Support bidirectional conversion: Code ↔ Natural Language
+Support direct execution of generated code
+"""
+
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, ttk
 import subprocess
 import tempfile
 import os
-import sys
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from langchain_community.llms import Ollama
-from langchain.prompts.chat import (
-    ChatPromptTemplate,
-    SystemMessagePromptTemplate,
-    HumanMessagePromptTemplate
-)
+import json
+import threading
+import time
+# Removed langchain dependency
+from llama_index.llms.openai_like import OpenAILike
+from llama_index.core.llms import ChatMessage
 
-# Model configuration
-MODEL_NAME = "qwen3:32b-q8_0"
-API_BASE = "http://163.184.132.210:11434"
+# Model configuration - removed unused variables
 
-class PlaywrightCodeInterpreter:
+class MidsceneCodeGenerator:
     def __init__(self, root):
         self.root = root
-        self.root.title("Playwright Code Interpreter")
-        self.root.geometry("1200x900")
+        self.root.title("Midscene AI Test Code Generator")
+        self.root.geometry("1920x1080")
         
-        # Configuration options
+        # Configuration variables
         self.config = {
-            "headless": tk.BooleanVar(value=False),
-            "model_name": tk.StringVar(value=MODEL_NAME),
-            "api_base": tk.StringVar(value=API_BASE),
-            "timeout": tk.IntVar(value=60)
+            "api_base": tk.StringVar(value="https://api.siliconflow.cn/v1"),
+            "openai_model": tk.StringVar(value="Qwen/Qwen2.5-VL-72B-Instruct"),  # OpenAI model
+            "openai_api_key": tk.StringVar(value="sk-ltoztgvvounfndpltgjhpgiargiddnozallzwdsaozzocxqz"),  # OpenAI API key - user should input their own key
+            "base_url": tk.StringVar(value="https://example.com"),
+            "test_name": tk.StringVar(value="example-test")
         }
+        
+        # Execution related variables
+        self.execution_process = None
+        self.temp_test_dir = None
+        self.saved_file_path = None
+        self.report_dir = None  # Report directory for test results
         
         # Set theme
         self.style = ttk.Style()
         if 'clam' in self.style.theme_names():
             self.style.theme_use('clam')
         
-        # Create LLM chains with enhanced prompt
+        # Create LLM chains
         self.code_to_text_chain = self._create_code_to_text_chain()
         self.text_to_code_chain = self._create_text_to_code_chain()
         
         self._setup_ui()
-        self._setup_config_panel()
+        
+        # Check initial environment status
+        self._update_environment_status()
         
     def _create_code_to_text_chain(self):
-        """Create LLM chain for code to natural language conversion"""
-        llm = Ollama(
-            model=self.config["model_name"].get(),
-            base_url=self.config["api_base"].get(),
-            timeout=self.config["timeout"].get()
+        """Create LLM for code to natural language conversion"""
+        api_key = self.config["openai_api_key"].get()
+        if not api_key:
+            raise ValueError("OpenAI API key is required. Please configure it in the settings.")
+        
+        llm = OpenAILike(
+            model=self.config["openai_model"].get(),
+            api_base=self.config["api_base"].get(),
+            api_key=api_key,
+            timeout=120,
+            is_chat_model=True,  # 设置为True以支持聊天接口
+            is_function_calling_model=False,  # 根据需要设置
+            context_window=128000  # 根据模型设置合适的上下文窗口
         )
         
-        template = """
-        /no_think You are a professional Playwright code interpreter. Convert Python Playwright code into clear, concise natural language instructions.
+        return llm
         
-        Output format:
-        1. Step-by-step description of actions
-        2. Include element locators (e.g., "[data-test='login-button']")
-        3. Do not include code or markdown syntax
-        
-        Example input:
-        page.goto("https://example.com");
-        page.locator("button").click();
-        
-        Example output:
-        1. Navigate to "https://example.com"
-        2. Click the button element
-        
-        INPUT: {text}
-        OUTPUT: Natural language instructions
-        """
-        
-        system_message_prompt = SystemMessagePromptTemplate.from_template(template)
-        human_template = "{text}"
-        human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
-        chat_prompt = ChatPromptTemplate.from_messages([system_message_prompt, human_message_prompt])
-        
-        return LLMChain(llm=llm, prompt=chat_prompt)
-    
     def _create_text_to_code_chain(self):
-        """Create LLM chain for natural language to code conversion with robust error handling"""
-        llm = Ollama(
-            model=self.config["model_name"].get(),
-            base_url=self.config["api_base"].get(),
-            timeout=self.config["timeout"].get()
+        """Create LLM for natural language to midscene code conversion"""
+        api_key = self.config["openai_api_key"].get()
+        if not api_key:
+            raise ValueError("OpenAI API key is required. Please configure it in the settings.")
+        
+        llm = OpenAILike(
+            model=self.config["openai_model"].get(),
+            api_base=self.config["api_base"].get(),
+            api_key=api_key,
+            timeout=120,
+            is_chat_model=True,
+            is_function_calling_model=False,
+            context_window=128000
         )
         
-        template = """
-        /no_think You are a professional Playwright code generator. Convert natural language to robust Python automation code with the following guidelines:
-
-        ### Robustness & Error Handling Requirements:
-        1. **Lifecycle Management**:
-           - Enclose all operations in try-finally to ensure browser closure
-           - Add `input("Press Enter to close...")` before closing for manual inspection
-           - Never call `context.close()` or `browser.close()` prematurely
-        
-        2. **Error Handling**:
-           - Wrap every critical action (click/fill/navigate) in try-except blocks
-           - Log errors with timestamps and context (e.g., `print(f"Error at step X: {e}")`)
-           - Capture screenshots on error: `page.screenshot(path="error-stepX.png")`
-           - Use specific exceptions (TimeoutError, ElementNotFoundError) when possible
-        
-        3. **Element Validation**:
-           - Always validate elements before interaction:
-             `expect(element).to_be_visible()`, `expect(element).to_be_enabled()`
-           - Use explicit waits with states: `wait_for_selector(state="visible", timeout=10000)`
-           - Prefer element-based waits over `time.sleep()`
-        
-        4. **Locator Best Practices**:
-           - Prioritize semantic selectors: `get_by_text`, `get_by_role`, `get_by_label`
-           - Use `exact=True` for text selectors when ambiguity exists
-           - Avoid index-based selectors (.first, .nth) unless necessary
-           - Prefer unique attributes: `data-test`, `id`, `name`
-        
-        5. **Debugging Aids**:
-           - Set `slow_mo=200` for step-by-step visualization
-           - Add print statements at key milestones (e.g., `print("Step X completed")`)
-           - Include conditional `time.sleep()` for manual inspection
-           - Use `page.pause()` for browser-side debugging
-        
-        ### Critical Operation Example (Create New Job):
-        ```python
-        try:
-            # Locate and validate button with explicit wait
-            create_btn = page.get_by_text("Create New Job", exact=True)
-            page.wait_for_selector(create_btn, state="visible", timeout=10000)
-            expect(create_btn).to_be_enabled()
-            create_btn.click()
-            print("Create New Job button clicked")
-            
-            # Wait for next page element to load
-            page.wait_for_selector("label:has-text('Job Name')", state="visible")
-        except Exception as e:
-            print(f"Error in job creation step: {e}")
-            page.screenshot(path="job_creation_error.png")
-            time.sleep(15)  # Pause for manual debug
-            raise
-        ```
-        
-        ### Example Input:
-        "Create a new job, navigate to well design, and add tools robustly"
-        
-        ### Example Output:
-        ```python
-        from playwright.sync_api import sync_playwright, expect
-        import time
-
-        def run(playwright):
-            # Launch browser with debugging options
-            browser = playwright.chromium.launch(headless=False, slow_mo=200)
-            context = browser.new_context()
-            page = context.new_page()
-            
-            try:
-                # Navigate to jobs page with error handling
-                page.goto("https://example.com/jobs", wait_until="networkidle")
-                print("Navigated to jobs dashboard")
-                
-                # Step 1: Create New Job
-                try:
-                    create_btn = page.get_by_text("Create New Job", exact=True)
-                    expect(create_btn).to_be_visible()
-                    create_btn.click()
-                    page.wait_for_selector("label:has-text('Job Name')", state="visible")
-                    page.get_by_label("Job Name").fill("test-job-123")
-                    page.get_by_text("Create", exact=True).click()
-                    page.wait_for_selector("text=Job created", state="visible")
-                    print("Job created successfully")
-                except Exception as e:
-                    print(f"Job creation failed: {e}")
-                    page.screenshot(path="job_error.png")
-                    raise
-                
-                # Step 2: Navigate to Well Design (similar error handling)
-                try:
-                    well_design = page.locator("#nav-panel").get_by_text("Well Design")
-                    expect(well_design).to_be_clickable()
-                    well_design.click()
-                    page.wait_for_load_state("networkidle")
-                    print("Navigated to Well Design")
-                except Exception as e:
-                    print(f"Well Design navigation error: {e}")
-                    page.screenshot(path="nav_error.png")
-                    raise
-                
-                # Step 3: Add tools with try-except
-                try:
-                    page.get_by_text("Add Tool").click()
-                    page.get_by_label("Tool Name").fill("drill-bit")
-                    page.get_by_text("Save").click()
-                    print("Tool added successfully")
-                except Exception as e:
-                    print(f"Tool addition error: {e}")
-                    page.screenshot(path="tool_error.png")
-                
-            except Exception as e:
-                print(f"Test execution error: {e}")
-            finally:
-                # Pause before closing for manual review
-                print("Press Enter to close browser...")
-                input()
-                context.close()
-                browser.close()
-
-        with sync_playwright() as playwright:
-            run(playwright)
-        ```
-        
-        INPUT: {text}
-        OUTPUT: Robust Playwright automation code with error handling (Python)
-        """
-        
-        system_message_prompt = SystemMessagePromptTemplate.from_template(template)
-        human_template = "{text}"
-        human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
-        chat_prompt = ChatPromptTemplate.from_messages([system_message_prompt, human_message_prompt])
-        
-        return LLMChain(llm=llm, prompt=chat_prompt)
+        return llm
     
     def _setup_ui(self):
-        """Set up the user interface with clear layouts"""
-        # Create title
-        title_frame = ttk.Frame(self.root)
-        title_frame.pack(fill=tk.X, pady=10)
-        
-        title_label = ttk.Label(
-            title_frame, 
-            text="Playwright Code Interpreter", 
-            font=("Arial", 16, "bold")
-        )
-        title_label.pack(side=tk.LEFT, padx=20)
-        
+        """Setup user interface"""
         # Create main frame
-        main_frame = ttk.Notebook(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # Workspace tab
-        workspace_frame = ttk.Frame(main_frame)
-        main_frame.add(workspace_frame, text="Workspace")
+        # Title
+        title_label = ttk.Label(
+            main_frame, 
+            text="Midscene AI Test Code Generator (Bidirectional + Execution)", 
+            font=("Arial", 18, "bold")
+        )
+        title_label.pack(pady=(0, 20))
         
-        # History tab
-        history_frame = ttk.Frame(main_frame)
-        main_frame.add(history_frame, text="History")
+        # Configuration area
+        config_frame = ttk.LabelFrame(main_frame, text="Configuration")
+        config_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Input section
-        input_frame = ttk.LabelFrame(workspace_frame, text="Input")
-        input_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        # Configuration items
+        config_grid = ttk.Frame(config_frame)
+        config_grid.pack(fill=tk.X, padx=10, pady=10)
         
-        # Code & natural language input split
-        input_splitter = ttk.Frame(input_frame, height=5)
-        input_splitter.pack(fill=tk.X, pady=5)
+        ttk.Label(config_grid, text="Base URL:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        base_url_entry = ttk.Entry(config_grid, textvariable=self.config["base_url"], width=50)
+        base_url_entry.grid(row=0, column=1, sticky=tk.W)
         
-        # Code input
-        code_frame = ttk.LabelFrame(input_frame, text="Playwright Code Input")
-        code_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=(0, 5), pady=5)
+        ttk.Label(config_grid, text="Test Name:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10))
+        test_name_entry = ttk.Entry(config_grid, textvariable=self.config["test_name"], width=50)
+        test_name_entry.grid(row=1, column=1, sticky=tk.W)
+        
+        ttk.Label(config_grid, text="OpenAI API Base:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10))
+        api_base_entry = ttk.Entry(config_grid, textvariable=self.config["api_base"], width=50)
+        api_base_entry.grid(row=2, column=1, sticky=tk.W)
+        
+        ttk.Label(config_grid, text="OpenAI Model:").grid(row=3, column=0, sticky=tk.W, padx=(0, 10))
+        openai_model_entry = ttk.Entry(config_grid, textvariable=self.config["openai_model"], width=50)
+        openai_model_entry.grid(row=3, column=1, sticky=tk.W)
+        
+        ttk.Label(config_grid, text="OpenAI API Key:").grid(row=4, column=0, sticky=tk.W, padx=(0, 10))
+        api_key_entry = ttk.Entry(config_grid, textvariable=self.config["openai_api_key"], width=50, show="*")
+        api_key_entry.grid(row=4, column=1, sticky=tk.W)
+        
+        # Add OpenAI configuration tips
+        openai_tips = ttk.Label(
+            config_grid, 
+            text="💡 Current: gpt-3.5-turbo-instruct | Recommended: 'gpt-4', 'gpt-3.5-turbo-instruct' for better performance",
+            font=("Arial", 9),
+            foreground="blue"
+        )
+        openai_tips.grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        
+        # Create input area - using left-right split
+        input_container = ttk.Frame(main_frame)
+        input_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Left side: code input
+        code_input_frame = ttk.LabelFrame(input_container, text="Playwright/Midscene Code Input")
+        code_input_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=(0, 5))
         
         self.code_input = scrolledtext.ScrolledText(
-            code_frame, 
+            code_input_frame, 
             wrap=tk.WORD, 
             width=40, 
-            height=15, 
+            height=12, 
             font=("Consolas", 10)
         )
-        self.code_input.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        self.code_input.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         
-        # Natural language input
-        nl_frame = ttk.LabelFrame(input_frame, text="Natural Language Description (robust requirements)")
-        nl_frame.pack(fill=tk.BOTH, expand=True, side=tk.RIGHT, padx=(5, 0), pady=5)
+        # Right side: natural language input
+        nl_input_frame = ttk.LabelFrame(input_container, text="Natural Language Test Description")
+        nl_input_frame.pack(fill=tk.BOTH, expand=True, side=tk.RIGHT, padx=(5, 0))
         
         self.natural_language = scrolledtext.ScrolledText(
-            nl_frame, 
+            nl_input_frame, 
             wrap=tk.WORD, 
             width=40, 
-            height=15, 
-            font=("Arial", 10)
+            height=12, 
+            font=("Arial", 11)
         )
-        self.natural_language.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        self.natural_language.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         
-        # Button frame
-        button_frame = ttk.Frame(workspace_frame)
-        button_frame.pack(fill=tk.X, pady=10)
+        # Example text
+        example_text = """Please input "playwright testing framework" in the search box, then press Enter to search.
+Wait for the search results to load completely, then check if there are search results containing "playwright".
+Click on the first search result, then verify that the page contains relevant content.
+Finally, check if the page title contains the "Playwright" keyword."""
+        self.natural_language.insert(tk.END, example_text)
         
-        # Function buttons with clear actions
+        # Button area
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # First row buttons: conversion functions
+        button_row1 = ttk.Frame(button_frame)
+        button_row1.pack(fill=tk.X, pady=(0, 5))
+        
         self.code_to_text_btn = ttk.Button(
-            button_frame, 
-            text="Code → Natural Language", 
+            button_row1, 
+            text="🔄 Code → Natural Language", 
             command=self._convert_code_to_text,
             style="Accent.TButton"
         )
-        self.code_to_text_btn.pack(side=tk.LEFT, padx=5)
+        self.code_to_text_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.text_to_code_btn = ttk.Button(
-            button_frame, 
-            text="Natural Language → Robust Code", 
+            button_row1, 
+            text="🚀 Natural Language → Midscene Code", 
             command=self._convert_text_to_code,
             style="Accent.TButton"
         )
-        self.text_to_code_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.format_code_btn = ttk.Button(
-            button_frame, 
-            text="Format Code", 
-            command=self._format_code,
-            style="Accent.TButton"
-        )
-        self.format_code_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.execute_btn = ttk.Button(
-            button_frame, 
-            text="Execute Code", 
-            command=self._execute_code,
-            style="Accent.TButton"
-        )
-        self.execute_btn.pack(side=tk.LEFT, padx=5)
+        self.text_to_code_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.load_example_btn = ttk.Button(
-            button_frame, 
-            text="Load Robust Example", 
-            command=self._load_example,
-            style="Accent.TButton"
+            button_row1, 
+            text="📖 Load Example", 
+            command=self._load_example
         )
-        self.load_example_btn.pack(side=tk.LEFT, padx=5)
+        self.load_example_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        self.clear_all_btn = ttk.Button(
-            button_frame, 
-            text="Clear All", 
-            command=self._clear_all,
-            style="Accent.TButton"
+        self.clear_btn = ttk.Button(
+            button_row1, 
+            text="🗑️ Clear All", 
+            command=self._clear_all
         )
-        self.clear_all_btn.pack(side=tk.LEFT, padx=5)
+        self.clear_btn.pack(side=tk.LEFT)
         
-        # Output sections
-        output_frame = ttk.LabelFrame(workspace_frame, text="Playwright Code Output (robust version)")
-        output_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        # Second row buttons: file operations and execution
+        button_row2 = ttk.Frame(button_frame)
+        button_row2.pack(fill=tk.X)
+        
+        self.save_btn = ttk.Button(
+            button_row2, 
+            text="💾 Save Code", 
+            command=self._save_code
+        )
+        self.save_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.setup_env_btn = ttk.Button(
+            button_row2, 
+            text="⚙️ Setup Test Environment", 
+            command=self._setup_test_environment
+        )
+        self.setup_env_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.validate_openai_btn = ttk.Button(
+            button_row2, 
+            text="🔍 Validate OpenAI", 
+            command=self._validate_openai_setup
+        )
+        self.validate_openai_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.force_reinstall_btn = ttk.Button(
+            button_row2, 
+            text="🔄 Force Reinstall Environment", 
+            command=self._force_reinstall_environment
+        )
+        self.force_reinstall_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.run_test_btn = ttk.Button(
+            button_row2, 
+            text="▶️ Run Test", 
+            command=self._run_test,
+            state="disabled"
+        )
+        self.run_test_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.stop_test_btn = ttk.Button(
+            button_row2, 
+            text="⏹️ Stop Test", 
+            command=self._stop_test,
+            state="disabled"
+        )
+        self.stop_test_btn.pack(side=tk.LEFT)
+        
+        # Output area
+        output_frame = ttk.LabelFrame(main_frame, text="Generated Midscene AI Test Code (.spec.ts)")
+        output_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         self.code_output = scrolledtext.ScrolledText(
             output_frame, 
@@ -341,124 +277,228 @@ class PlaywrightCodeInterpreter:
             height=10, 
             font=("Consolas", 10)
         )
-        self.code_output.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        self.code_output.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         
-        result_frame = ttk.LabelFrame(workspace_frame, text="Execution Result")
-        result_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        # Execution output area
+        execution_frame = ttk.LabelFrame(main_frame, text="Test Execution Output")
+        execution_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
-        self.result_output = scrolledtext.ScrolledText(
-            result_frame, 
+        self.execution_output = scrolledtext.ScrolledText(
+            execution_frame, 
             wrap=tk.WORD, 
             width=80, 
-            height=5, 
-            font=("Consolas", 10)
+            height=8, 
+            font=("Consolas", 9),
+            bg="#1e1e1e",
+            fg="#ffffff"
         )
-        self.result_output.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        self.execution_output.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         
         # Status bar
         self.status_bar = ttk.Label(
-            self.root, 
-            text="Ready", 
+            main_frame, 
+            text="🚀 Ready - Configure settings and generate Midscene AI test code", 
             relief=tk.SUNKEN, 
             anchor=tk.W
         )
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Configure button styles
-        self.style.configure("Accent.TButton", font=("Arial", 10, "bold"))
-    
-    def _setup_config_panel(self):
-        """Set up LLM and Playwright configuration panel"""
-        config_frame = ttk.LabelFrame(self.root, text="LLM & Playwright Configuration")
-        config_frame.pack(fill=tk.X, padx=20, pady=5)
-        
-        # First row: headless mode and timeout
-        row1_frame = ttk.Frame(config_frame)
-        row1_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Checkbutton(
-            row1_frame,
-            text="Run Playwright in headless mode",
-            variable=self.config["headless"]
-        ).pack(side=tk.LEFT, padx=(0, 20))
-        
-        ttk.Label(row1_frame, text="LLM Timeout (seconds):").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Entry(row1_frame, textvariable=self.config["timeout"], width=5).pack(side=tk.LEFT)
-        
-        # Second row: model and API configuration
-        row2_frame = ttk.Frame(config_frame)
-        row2_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(row2_frame, text="Ollama Model:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Entry(row2_frame, textvariable=self.config["model_name"], width=30).pack(side=tk.LEFT, padx=(0, 20))
-        
-        ttk.Label(row2_frame, text="Ollama API Base:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Entry(row2_frame, textvariable=self.config["api_base"], width=40).pack(side=tk.LEFT)
+        self.status_bar.pack(fill=tk.X, pady=(10, 0))
     
     def _convert_code_to_text(self):
-        """Convert Playwright code to natural language instructions"""
+        """Convert code to natural language description"""
         code = self.code_input.get("1.0", tk.END).strip()
         if not code:
-            messagebox.showwarning("Warning", "Please enter Playwright code")
+            messagebox.showwarning("Warning", "Please input Playwright/Midscene code")
             return
         
         try:
-            self.status_bar.config(text="Converting code to natural language...")
+            self.status_bar.config(text="Analyzing code and converting to natural language...")
             self.root.update()
             
-            result = self.code_to_text_chain.run(text=code)
-            self.natural_language.delete("1.0", tk.END)
-            self.natural_language.insert(tk.END, result)
+            # Create LLM with validation
+            llm = self._create_code_to_text_chain()
             
-            self.status_bar.config(text="Conversion completed")
-        except TimeoutError:
-            messagebox.showerror("Timeout", "LLM took too long to respond. Please try again.")
-            self.status_bar.config(text="Ready")
-        except ConnectionError:
-            messagebox.showerror("Connection Error", f"Could not connect to Ollama API at {API_BASE}")
-            self.status_bar.config(text="Ready")
+            # Create system and user messages
+            system_prompt = """
+You are a professional Playwright code interpreter. Convert Python Playwright code into clear, concise natural language instructions.
+
+IMPORTANT RULES:
+1. Output ONLY the step-by-step test actions
+2. Do NOT include any metadata, token usage, or API response information
+3. Do NOT include setup code like imports or test fixtures
+4. Use numbered list format (1. 2. 3. etc.)
+5. Include element locators when present
+6. Do not include code syntax or markdown
+
+Example input:
+page.goto("https://example.com");
+page.locator("button").click();
+
+Example output:
+1. Navigate to "https://example.com"
+2. Click the button element
+
+Convert the following code to natural language instructions:
+            """
+            
+            messages = [
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=code)
+            ]
+            
+            print(f"Debug - Input code sent to LLM: {code[:100]}...")
+            result = llm.chat(messages)
+            print(f"Debug - LLM response type: {type(result)}")
+            print(f"Debug - LLM response content: {str(result)[:200]}...")
+            
+            # Clear and update natural language description area
+            self.natural_language.delete("1.0", tk.END)
+            # Extract content from ChatResponse
+            if hasattr(result, 'message') and hasattr(result.message, 'content'):
+                self.natural_language.insert(tk.END, result.message.content.strip())
+            else:
+                self.natural_language.insert(tk.END, str(result).strip())
+            self.status_bar.config(text="✅ Code successfully converted to natural language description")
+            
+        except ValueError as ve:
+            messagebox.showerror("Configuration Error", str(ve))
+            self.status_bar.config(text="❌ Configuration error")
         except Exception as e:
-            messagebox.showerror("Error", f"Conversion error: {str(e)}")
-            self.status_bar.config(text="Ready")
+            error_msg = str(e)
+            if "500" in error_msg or "Internal Server Error" in error_msg:
+                messagebox.showerror("API Error", f"API server error (HTTP 500). This may be due to:\n\n1. Invalid API key\n2. Unsupported model name\n3. API service temporarily unavailable\n\nPlease check your configuration and try again.\n\nError details: {error_msg}")
+            elif "401" in error_msg or "Unauthorized" in error_msg:
+                messagebox.showerror("Authentication Error", "API key is invalid or expired. Please check your OpenAI API key.")
+            elif "timeout" in error_msg.lower():
+                messagebox.showerror("Timeout Error", "API request timed out. Please check your network connection and try again.")
+            else:
+                messagebox.showerror("Error", f"Error converting code: {error_msg}")
+            self.status_bar.config(text="❌ Code conversion failed")
+            print(f"Debug - Code to text error: {e}")
     
     def _convert_text_to_code(self):
-        """Convert natural language to robust Playwright code with error handling"""
+        """Generate Midscene AI test code"""
         text = self.natural_language.get("1.0", tk.END).strip()
         if not text:
-            messagebox.showwarning("Warning", "Please enter a natural language description")
+            messagebox.showwarning("Warning", "Please input natural language test description")
             return
         
         try:
-            self.status_bar.config(text="Generating robust Playwright code...")
+            self.status_bar.config(text="Generating Midscene AI test code...")
             self.root.update()
             
-            result = self.text_to_code_chain.run(text=text)
-            cleaned_code = self._cleanse_code_output(result)
+            # Prepare template parameters
+            base_url = self.config["base_url"].get()
+            test_name = self.config["test_name"].get()
             
-            # Apply headless mode if enabled
-            if self.config["headless"].get():
-                cleaned_code = cleaned_code.replace(
-                    "launch(headless=False)", 
-                    "launch(headless=True)"
-                )
+            # Debug information
+            print(f"Debug - Base URL: '{base_url}'")
+            print(f"Debug - Test Name: '{test_name}'")
+            print(f"Debug - Description: '{text[:50]}...'")
+            
+            # Validate parameters
+            if not base_url:
+                messagebox.showwarning("Warning", "Please configure Base URL")
+                return
+            
+            if not test_name:
+                messagebox.showwarning("Warning", "Please configure Test Name")
+                return
+            
+            # Create LLM with validation
+            llm = self._create_text_to_code_chain()
+            
+            # Build complete prompt
+            prompt = f"""
+You are a professional Midscene AI test code generation expert. Generate high-quality TypeScript test code based on natural language descriptions.
+
+### Important Rules:
+1. **Strictly follow Midscene AI API specifications**
+2. **Generated code must be directly executable**
+3. **Use correct type definitions and import statements**
+4. **Include reasonable waits and assertions**
+5. **All code comments and strings must be in English**
+
+### Midscene AI Function Signatures (Must strictly follow):
+```typescript
+aiInput(value: string, locator: string): Promise<void>
+aiTap(locator: string): Promise<void>  
+aiAssert(assertion: string): Promise<void>
+aiQuery<T>(queryObject: Record<string, string>): Promise<T>
+aiKeyboardPress(key: string, locator?: string): Promise<void>
+aiHover(locator: string): Promise<void>
+aiWaitFor(assertion: string): Promise<void>
+```
+
+### Standard Template Structure:
+```typescript
+import {{ test as base }} from '@playwright/test';
+import type {{ PlayWrightAiFixtureType }} from '@midscene/web/playwright';
+import {{ PlaywrightAiFixture }} from '@midscene/web/playwright';
+
+export const test = base.extend<PlayWrightAiFixtureType>(PlaywrightAiFixture({{
+  waitForNetworkIdleTimeout: 2000,
+}}));
+
+test.beforeEach(async ({{ page }}) => {{
+  await page.goto('{base_url}');
+  await page.setViewportSize({{ width: 1920, height: 1080 }});
+}});
+
+test('{test_name}', async ({{
+  aiInput,
+  aiAssert,
+  aiQuery,
+  aiKeyboardPress,
+  aiHover,
+  aiTap,
+  aiWaitFor,
+  page,
+}}) => {{
+  // Test steps generated here
+}});
+```
+
+### Current Task:
+Base URL: {base_url}
+Test Name: {test_name}
+Natural Language Description: {text}
+
+Please generate complete, directly executable Midscene AI test code with all comments and strings in English:
+            """
+            
+            # Call LLM with complete prompt
+            result = llm.complete(prompt)
+            
+            # Extract content from CompletionResponse
+            if hasattr(result, 'text'):
+                cleaned_code = self._clean_generated_code(result.text)
+            else:
+                cleaned_code = self._clean_generated_code(str(result))
             
             self.code_output.delete("1.0", tk.END)
             self.code_output.insert(tk.END, cleaned_code)
-            self.status_bar.config(text="Robust code generation completed")
-        except TimeoutError:
-            messagebox.showerror("Timeout", "LLM took too long. Please try again.")
-            self.status_bar.config(text="Ready")
-        except ConnectionError:
-            messagebox.showerror("Connection Error", f"API error: {self.config['api_base'].get()}")
-            self.status_bar.config(text="Ready")
+            self.status_bar.config(text="✅ Midscene AI test code generation completed")
+            
+        except ValueError as ve:
+            messagebox.showerror("Configuration Error", str(ve))
+            self.status_bar.config(text="❌ Configuration error")
         except Exception as e:
-            messagebox.showerror("Error", f"Code generation error: {str(e)}")
-            self.status_bar.config(text="Ready")
+            error_msg = str(e)
+            if "500" in error_msg or "Internal Server Error" in error_msg:
+                messagebox.showerror("API Error", f"API server error (HTTP 500). This may be due to:\n\n1. Invalid API key\n2. Unsupported model name\n3. API service temporarily unavailable\n\nPlease check your configuration and try again.\n\nError details: {error_msg}")
+            elif "401" in error_msg or "Unauthorized" in error_msg:
+                messagebox.showerror("Authentication Error", "API key is invalid or expired. Please check your OpenAI API key.")
+            elif "timeout" in error_msg.lower():
+                messagebox.showerror("Timeout Error", "API request timed out. Please check your network connection and try again.")
+            else:
+                messagebox.showerror("Error", f"Error generating code: {error_msg}")
+            self.status_bar.config(text="❌ Code generation failed")
+            print(f"Debug - Error details: {e}")  # 添加错误详情打印
     
-    def _cleanse_code_output(self, code):
-        """Cleanse LLM-generated code to ensure Python validity"""
-        # Remove common LLM response markers
-        prefixes = ["```python", "```", "python", "# Code:", "# Output:"]
+    def _clean_generated_code(self, code):
+        """Clean generated code"""
+        # Remove common LLM response prefixes
+        prefixes = ["```typescript", "```ts", "```javascript", "```js", "```", "// Code:", "// Output:"]
         for prefix in prefixes:
             if code.startswith(prefix):
                 code = code[len(prefix):].lstrip()
@@ -466,137 +506,587 @@ class PlaywrightCodeInterpreter:
         if code.endswith("```"):
             code = code[:-3].rstrip()
         
-        # Ensure proper function structure
-        if "def run(playwright):" not in code:
-            code = f"def run(playwright):\n    # Generated code\n{self._indent_code(code)}\n\nwith sync_playwright() as playwright:\n    run(playwright)"
-        
-        # Add missing imports if needed
-        if "from playwright.sync_api import" not in code:
-            code = "from playwright.sync_api import sync_playwright, expect\nimport time\n\n" + code
+        # Ensure code contains necessary imports and structure
+        if "import { test as base }" not in code:
+            messagebox.showwarning("Warning", "Generated code may be incomplete, missing necessary import statements")
         
         return code
     
-    def _indent_code(self, code):
-        """Indent code by 4 spaces per line"""
-        lines = code.split('\n')
-        indented_lines = ['    ' + line for line in lines]
-        return '\n'.join(indented_lines)
-    
-    def _format_code(self):
-        """Format the generated code using Python's black formatter"""
+    def _save_code(self):
+        """Save generated code to file"""
         code = self.code_output.get("1.0", tk.END).strip()
         if not code:
-            messagebox.showwarning("Warning", "No code to format")
+            messagebox.showwarning("Warning", "No code to save")
             return
         
         try:
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(code)
-                temp_filename = f.name
+            from tkinter import filedialog
             
-            # Format the code using black
+            # Try using the simplified file dialog first
             try:
-                subprocess.run(
-                    [sys.executable, '-m', 'black', '-q', temp_filename],
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                filename = filedialog.asksaveasfilename(
+                    defaultextension=".spec.ts",
+                    title="Save Midscene Test Code",
+                    initialfilename="generated-test.spec.ts"
                 )
-            except subprocess.CalledProcessError as e:
-                # If black fails, try autopep8 as fallback
-                subprocess.run(
-                    [sys.executable, '-m', 'autopep8', '--in-place', temp_filename],
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
+            except Exception as dialog_error:
+                print(f"Debug - File dialog error: {dialog_error}")
+                # Fallback: save to current directory with timestamp
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"midscene_test_{timestamp}.spec.ts"
+                messagebox.showinfo("Info", f"File dialog error, saving to current directory as: {filename}")
             
-            # Read the formatted code
-            with open(temp_filename, 'r') as f:
-                formatted_code = f.read()
-            
-            # Update the code output
-            self.code_output.delete("1.0", tk.END)
-            self.code_output.insert(tk.END, formatted_code)
-            
-            # Clean up the temporary file
-            os.unlink(temp_filename)
-            
-            self.status_bar.config(text="Code formatted successfully")
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                self.saved_file_path = filename
+                
+                # Create report directory in the same location as the saved file
+                file_dir = os.path.dirname(os.path.abspath(filename))
+                self.report_dir = os.path.join(file_dir, "midscene_run", "report")
+                os.makedirs(self.report_dir, exist_ok=True)
+                
+                messagebox.showinfo("Success", f"Code saved to: {filename}\nReports will be saved to: {self.report_dir}")
+                self.status_bar.config(text=f"✅ Code saved to: {filename}")
+                self._log_execution(f"📁 Code saved to: {filename}")
+                self._log_execution(f"📊 Reports will be saved to: {self.report_dir}")
+                
+                # Enable execution related buttons after saving
+                self.run_test_btn.config(state="normal")
         except Exception as e:
-            messagebox.showerror("Error", f"Formatting error: {str(e)}")
-            self.status_bar.config(text="Ready")
+            messagebox.showerror("Error", f"Error saving file: {str(e)}")
+            print(f"Debug - Save error details: {e}")
     
-    def _execute_code(self):
-        """Execute the generated Playwright code"""
+    def _setup_test_environment(self):
+        """Setup test environment"""
+        try:
+            # First validate OpenAI service
+            self.status_bar.config(text="Validating OpenAI service...")
+            self.root.update()
+            
+            is_openai_ok, openai_message = self._check_openai_service()
+            if not is_openai_ok:
+                self._log_execution(openai_message)
+                result = messagebox.askyesno(
+                    "OpenAI Service Issue", 
+                    f"{openai_message}\n\nDo you want to continue setting up the environment anyway?\n\n"
+                    f"To fix this issue:\n"
+                    f"1. Set your OpenAI API key\n"
+                    f"2. Ensure you have access to the model: {self.config['openai_model'].get()}\n"
+                    f"3. Check your API base URL: {self.config['api_base'].get()}"
+                )
+                if not result:
+                    self.status_bar.config(text="❌ Environment setup cancelled - Please fix OpenAI configuration first")
+                    return
+            else:
+                self._log_execution(openai_message)
+            
+            self.status_bar.config(text="Setting up test environment...")
+            self.root.update()
+            
+            # Check if environment already exists and is valid
+            if self._check_existing_environment():
+                self._log_execution("✅ Found existing test environment, reusing...")
+                self._log_execution(f"📁 Test directory: {self.temp_test_dir}")
+                self.status_bar.config(text="✅ Test environment ready (reused existing)")
+                self.setup_env_btn.config(state="normal")
+                self.run_test_btn.config(state="normal")
+                return
+            
+            # Create new temporary test directory
+            if self.temp_test_dir and os.path.exists(self.temp_test_dir):
+                import shutil
+                shutil.rmtree(self.temp_test_dir)
+            
+            self.temp_test_dir = tempfile.mkdtemp(prefix="midscene_test_")
+            
+            # Create package.json
+            package_json = {
+                "name": "midscene-test",
+                "version": "1.0.0",
+                "description": "Generated Midscene test",
+                "scripts": {
+                    "test": "playwright test",
+                    "test:headed": "playwright test --headed",
+                    "test:debug": "playwright test --debug"
+                },
+                "devDependencies": {
+                    "@midscene/web": "^0.20.0",
+                    "@playwright/test": "^1.50.1",
+                    "@types/node": "^22.10.5"
+                },
+                "dependencies": {
+                    "dotenv": "^16.4.7"
+                }
+            }
+            
+            with open(os.path.join(self.temp_test_dir, "package.json"), 'w', encoding='utf-8') as f:
+                json.dump(package_json, f, indent=2)
+            
+            # Create .env file for Midscene configuration with OpenAI
+            env_content = f"""# Midscene AI Configuration for OpenAI
+OPENAI_API_KEY={self.config["openai_api_key"].get()}
+OPENAI_BASE_URL={self.config["api_base"].get()}
+MIDSCENE_MODEL_NAME={self.config["openai_model"].get()}
+
+# Debug settings (optional)
+# DEBUG=midscene:ai:profile:stats
+# DEBUG=midscene:ai:call
+
+# Additional OpenAI-specific settings
+# MIDSCENE_PREFERRED_LANGUAGE=English
+"""
+            
+            with open(os.path.join(self.temp_test_dir, ".env"), 'w', encoding='utf-8') as f:
+                f.write(env_content)
+            
+            # Create playwright.config.ts with dynamic report output path
+            playwright_config = '''import { defineConfig, devices } from '@playwright/test';
+import dotenv from 'dotenv';
+
+// Load .env file
+dotenv.config();
+
+export default defineConfig({
+  testDir: './tests',
+  timeout: 90 * 1000,
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: [
+    ["list"], 
+    ["@midscene/web/playwright-report"]
+  ],
+  use: {
+    trace: 'on-first-retry',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+});
+'''
+            
+            with open(os.path.join(self.temp_test_dir, "playwright.config.ts"), 'w', encoding='utf-8') as f:
+                f.write(playwright_config)
+            
+            # Create tests directory
+            tests_dir = os.path.join(self.temp_test_dir, "tests")
+            os.makedirs(tests_dir, exist_ok=True)
+            
+            self._log_execution("✅ Test environment setup completed")
+            self._log_execution(f"📁 Test directory: {self.temp_test_dir}")
+            self._log_execution(f"🤖 OpenAI model: {self.config['openai_model'].get()}")
+            self._log_execution(f"🔗 API endpoint: {self.config['api_base'].get()}")
+            
+            # Install dependencies in background
+            threading.Thread(target=self._install_dependencies, daemon=True).start()
+            
+            self.status_bar.config(text="✅ Test environment setup completed, installing dependencies...")
+            self.setup_env_btn.config(state="disabled")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error setting up test environment: {str(e)}")
+            self.status_bar.config(text="❌ Test environment setup failed")
+    
+    def _check_existing_environment(self):
+        """Check if existing test environment is valid and can be reused"""
+        if not self.temp_test_dir or not os.path.exists(self.temp_test_dir):
+            return False
+        
+        try:
+            # Check required files exist
+            required_files = [
+                "package.json",
+                "playwright.config.ts", 
+                ".env"
+            ]
+            
+            for file in required_files:
+                if not os.path.exists(os.path.join(self.temp_test_dir, file)):
+                    return False
+            
+            # Check if node_modules exists (dependencies installed)
+            node_modules_path = os.path.join(self.temp_test_dir, "node_modules")
+            if not os.path.exists(node_modules_path):
+                return False
+            
+            # Check if key packages are installed
+            key_packages = ["@midscene/web", "@playwright/test"]
+            for package in key_packages:
+                package_path = os.path.join(node_modules_path, package)
+                if not os.path.exists(package_path):
+                    return False
+            
+            # Check if tests directory exists
+            tests_dir = os.path.join(self.temp_test_dir, "tests")
+            if not os.path.exists(tests_dir):
+                os.makedirs(tests_dir, exist_ok=True)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Debug - Environment check error: {e}")
+            return False
+    
+    def _install_dependencies(self):
+        """Install dependencies in background"""
+        try:
+            self._log_execution("📦 Installing Node.js dependencies...")
+            
+            # Install dependencies
+            result = subprocess.run(
+                ["npm", "install"],
+                cwd=self.temp_test_dir,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes timeout
+            )
+            
+            if result.returncode == 0:
+                self._log_execution("✅ Dependencies installed successfully")
+                
+                # Install Playwright browsers
+                self._log_execution("🌐 Installing Playwright browsers...")
+                browser_result = subprocess.run(
+                    ["npx", "playwright", "install", "chromium"],
+                    cwd=self.temp_test_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 minutes timeout
+                )
+                
+                if browser_result.returncode == 0:
+                    self._log_execution("✅ Playwright browsers installed successfully")
+                    self.root.after(0, lambda: self.status_bar.config(text="✅ Test environment fully ready"))
+                    self.root.after(0, lambda: self.setup_env_btn.config(state="normal"))
+                else:
+                    self._log_execution(f"❌ Browser installation failed: {browser_result.stderr}")
+            else:
+                self._log_execution(f"❌ Dependencies installation failed: {result.stderr}")
+                
+        except subprocess.TimeoutExpired:
+            self._log_execution("⏰ Installation timeout, please check network connection")
+        except Exception as e:
+            self._log_execution(f"❌ Installation error: {str(e)}")
+    
+    def _run_test(self):
+        """Execute test"""
+        if not self.temp_test_dir:
+            messagebox.showwarning("Warning", "Please setup test environment first")
+            return
+        
         code = self.code_output.get("1.0", tk.END).strip()
         if not code:
             messagebox.showwarning("Warning", "No code to execute")
             return
         
+        # Check if code has been saved (to determine report location)
+        if not hasattr(self, 'saved_file_path') or not self.saved_file_path:
+            # Code hasn't been saved, ask user to save first or use temp location
+            result = messagebox.askyesno(
+                "Save Code", 
+                "Code hasn't been saved yet. Do you want to save it first?\n\n"
+                "Yes: Save code and reports will be saved to the same location\n"
+                "No: Execute directly (reports will be saved to temp location)"
+            )
+            if result:
+                self._save_code()
+                if not hasattr(self, 'saved_file_path') or not self.saved_file_path:
+                    return  # User cancelled save dialog
+            else:
+                # Use temp report location
+                self.report_dir = os.path.join(self.temp_test_dir, "midscene_run", "report")
+                os.makedirs(self.report_dir, exist_ok=True)
+        
         try:
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # Save code to temporary test file
+            test_file = os.path.join(self.temp_test_dir, "tests", "generated-test.spec.ts")
+            with open(test_file, 'w', encoding='utf-8') as f:
                 f.write(code)
-                temp_filename = f.name
             
-            self.result_output.delete("1.0", tk.END)
-            self.result_output.insert(tk.END, "Executing code...\n")
-            self.root.update()
+            self._log_execution("🚀 Starting test execution...")
+            self._log_execution(f"📄 Test file: {test_file}")
+            self._log_execution(f"📊 Reports will be saved to: {self.report_dir}")
             
-            # Execute the code using a subprocess
-            process = subprocess.Popen(
-                [sys.executable, temp_filename],
+            # Execute test in new thread
+            threading.Thread(target=self._execute_playwright_test, args=(test_file,), daemon=True).start()
+            
+            # Update button states
+            self.run_test_btn.config(state="disabled")
+            self.stop_test_btn.config(state="normal")
+            self.status_bar.config(text="▶️ Executing test...")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error executing test: {str(e)}")
+            self.status_bar.config(text="❌ Test execution failed")
+    
+    def _execute_playwright_test(self, test_file):
+        """Execute Playwright test"""
+        try:
+            # Set up environment variables
+            test_env = os.environ.copy()
+            
+            # Execute test with custom report location
+            self.execution_process = subprocess.Popen(
+                ["npx", "playwright", "test", test_file, "--headed"],
+                cwd=self.temp_test_dir,
+                env=test_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
+                text=True,
+                universal_newlines=True
             )
             
-            # Capture and display the output
-            for line in iter(process.stdout.readline, ''):
-                self.result_output.insert(tk.END, line)
-                self.result_output.see(tk.END)
-                self.root.update()
+            # Read output in real time
+            for line in iter(self.execution_process.stdout.readline, ''):
+                if line:
+                    self.root.after(0, lambda l=line: self._log_execution(l.strip()))
             
-            process.wait()
+            # Wait for process to end
+            return_code = self.execution_process.wait()
             
-            # Clean up the temporary file
-            os.unlink(temp_filename)
+            if return_code == 0:
+                self.root.after(0, lambda: self._log_execution("✅ Test execution successful"))
+                self.root.after(0, lambda: self._log_execution(f"📊 Test report saved to: {self.report_dir}"))
+                self.root.after(0, lambda: self.status_bar.config(text="✅ Test execution completed"))
+                # Try to open report folder
+                self.root.after(0, self._show_report_location)
+            else:
+                self.root.after(0, lambda: self._log_execution(f"❌ Test execution failed, exit code: {return_code}"))
+                self.root.after(0, lambda: self.status_bar.config(text="❌ Test execution failed"))
             
-            self.status_bar.config(text="Code execution completed")
         except Exception as e:
-            messagebox.showerror("Error", f"Execution error: {str(e)}")
-            self.status_bar.config(text="Ready")
+            self.root.after(0, lambda: self._log_execution(f"❌ Test execution error: {str(e)}"))
+            self.root.after(0, lambda: self.status_bar.config(text="❌ Test execution error"))
+        finally:
+            # Reset button states
+            self.root.after(0, lambda: self.run_test_btn.config(state="normal"))
+            self.root.after(0, lambda: self.stop_test_btn.config(state="disabled"))
+            self.execution_process = None
+    
+    def _stop_test(self):
+        """Stop test execution"""
+        if self.execution_process:
+            try:
+                self.execution_process.terminate()
+                self._log_execution("⏹️ Test stopped")
+                self.status_bar.config(text="⏹️ Test stopped")
+            except Exception as e:
+                self._log_execution(f"❌ Error stopping test: {str(e)}")
+            finally:
+                self.run_test_btn.config(state="normal")
+                self.stop_test_btn.config(state="disabled")
+                self.execution_process = None
+    
+    def _show_report_location(self):
+        """Show report location to user"""
+        if hasattr(self, 'report_dir') and self.report_dir and os.path.exists(self.report_dir):
+            result = messagebox.askyesno(
+                "Test Report", 
+                f"Test execution completed!\n\n"
+                f"Report saved to:\n{self.report_dir}\n\n"
+                f"Do you want to open the report folder?"
+            )
+            if result:
+                try:
+                    import platform
+                    system = platform.system()
+                    if system == "Darwin":  # macOS
+                        subprocess.run(["open", self.report_dir])
+                    elif system == "Windows":
+                        subprocess.run(["explorer", self.report_dir])
+                    elif system == "Linux":
+                        subprocess.run(["xdg-open", self.report_dir])
+                except Exception as e:
+                    self._log_execution(f"❌ Error opening report folder: {str(e)}")
+    
+    def _log_execution(self, message):
+        """Log execution messages"""
+        timestamp = time.strftime("%H:%M:%S")
+        log_message = f"[{timestamp}] {message}\n"
+        
+        self.execution_output.insert(tk.END, log_message)
+        self.execution_output.see(tk.END)
+        self.root.update_idletasks()
     
     def _load_example(self):
-        """Load a robust example into the input fields"""
-        example_text = """
-1. Navigate to the login page
-2. Enter username and password
-3. Click login button
-4. Wait for dashboard to load
-5. Navigate to user profile
-6. Update email address
-7. Save changes
-8. Verify success message
-        """.strip()
+        """Load example data"""
+        # Clear all fields
+        self._clear_all()
         
-        self.natural_language.delete("1.0", tk.END)
+        # Set example configuration
+        self.config["base_url"].set("https://cn.bing.com")
+        self.config["test_name"].set("search playwright on bing")
+        
+        # Load example code
+        example_code = """import { test as base } from '@playwright/test';
+import type { PlayWrightAiFixtureType } from '@midscene/web/playwright';
+import { PlaywrightAiFixture } from '@midscene/web/playwright';
+
+export const test = base.extend<PlayWrightAiFixtureType>(PlaywrightAiFixture({
+  waitForNetworkIdleTimeout: 2000,
+}));
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('https://cn.bing.com');
+  await page.setViewportSize({ width: 1920, height: 1080 });
+});
+
+test('search playwright on bing', async ({
+  aiInput,
+  aiAssert,
+  aiQuery,
+  aiTap,
+  aiWaitFor,
+  page,
+}) => {
+  // Input search keyword and execute search
+  await aiInput('playwright', 'search input box');
+  await aiKeyboardPress('Enter');
+  
+  // Wait for search results to load
+  await aiWaitFor('search results are displayed');
+  
+  // Extract search results
+  const searchResults = await aiQuery({
+    titles: 'search result titles as string array',
+    firstResultTitle: 'first search result title as string'
+  });
+  
+  console.log('Search results:', searchResults);
+  
+  // Verify search results
+  await aiAssert('search results contain "playwright" related content');
+  await aiAssert('there are more than 1 search results');
+});"""
+        
+        # Load example natural language description
+        example_text = """Execute the following test steps on the Bing search page:
+
+1. Input the keyword "playwright" in the search box
+2. Press Enter to execute the search
+3. Wait for the search results page to fully load
+4. Extract the title information of search results
+5. Verify that search results contain "playwright" related content
+6. Verify that the number of search results is greater than 1
+
+Please ensure each step has appropriate waiting and verification mechanisms."""
+        
+        self.code_input.insert(tk.END, example_code)
         self.natural_language.insert(tk.END, example_text)
-        
-        self.status_bar.config(text="Example loaded - click 'Natural Language → Robust Code' to generate")
+        self.status_bar.config(text="📖 Example data loaded - Test bidirectional conversion and execution features")
     
     def _clear_all(self):
-        """Clear all input and output fields"""
+        """Clear all text areas"""
         self.code_input.delete("1.0", tk.END)
         self.natural_language.delete("1.0", tk.END)
         self.code_output.delete("1.0", tk.END)
-        self.result_output.delete("1.0", tk.END)
-        self.status_bar.config(text="All fields cleared")
+        self.execution_output.delete("1.0", tk.END)
+        self.status_bar.config(text="🗑️ All content cleared")
+    
+    def _force_reinstall_environment(self):
+        """Force reinstall test environment (delete existing and create new)"""
+        try:
+            self.status_bar.config(text="Force reinstalling test environment...")
+            self.root.update()
+            
+            # Delete existing environment
+            if self.temp_test_dir and os.path.exists(self.temp_test_dir):
+                import shutil
+                self._log_execution("🗑️ Removing existing test environment...")
+                shutil.rmtree(self.temp_test_dir)
+                self.temp_test_dir = None
+            
+            # Create fresh environment
+            self._log_execution("🔄 Creating fresh test environment...")
+            self._setup_test_environment()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error force reinstalling environment: {str(e)}")
+            self.status_bar.config(text="❌ Force reinstall failed")
+    
+    def _update_environment_status(self):
+        """Update environment status display"""
+        if self._check_existing_environment():
+            self.status_bar.config(text=f"✅ Test environment ready - {self.temp_test_dir}")
+            self.run_test_btn.config(state="normal")
+        else:
+            self.status_bar.config(text="⚙️ Ready - Click 'Setup Test Environment' to begin")
+            self.run_test_btn.config(state="disabled")
+    
+    def _check_openai_service(self):
+        """Check if OpenAI service is accessible"""
+        try:
+            import requests
+            
+            api_key = self.config["openai_api_key"].get()
+            if not api_key:
+                return False, "❌ OpenAI API key not configured"
+            
+            # Check OpenAI service health
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Try to list models to verify API access
+            response = requests.get(f"{self.config['api_base'].get()}/models", headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                models = [model['id'] for model in data.get('data', [])]
+                current_model = self.config["openai_model"].get()
+                
+                if current_model in models:
+                    return True, f"✅ OpenAI service accessible, model '{current_model}' available"
+                else:
+                    return True, f"✅ OpenAI service accessible, but model '{current_model}' not found in list. It may still work."
+            elif response.status_code == 401:
+                return False, "❌ OpenAI API key is invalid or expired"
+            elif response.status_code == 403:
+                return False, "❌ OpenAI API access forbidden. Check your API key permissions."
+            else:
+                return False, f"❌ OpenAI service error (status: {response.status_code})"
+                
+        except ImportError:
+            return False, "❌ 'requests' library not installed. Run: pip install requests"
+        except requests.exceptions.ConnectionError:
+            return False, f"❌ Cannot connect to OpenAI at {self.config['api_base'].get()}. Please check your internet connection."
+        except requests.exceptions.Timeout:
+            return False, "❌ OpenAI service timeout. Please check your internet connection."
+        except Exception as e:
+            return False, f"❌ OpenAI check failed: {str(e)}"
+    
+    def _validate_openai_setup(self):
+        """Validate OpenAI setup and show status"""
+        is_ok, message = self._check_openai_service()
+        
+        if is_ok:
+            messagebox.showinfo("OpenAI Status", message)
+            self._log_execution(message)
+        else:
+            messagebox.showwarning("OpenAI Status", f"{message}\n\nPlease ensure:\n1. OpenAI API key is set correctly\n2. You have access to model: {self.config['openai_model'].get()}\n3. API base URL is correct: {self.config['api_base'].get()}")
+            self._log_execution(message)
+        
+        return is_ok
+
+def main():
+    """Main function"""
+    root = tk.Tk()
+    app = MidsceneCodeGenerator(root)
+    
+    # Set window icon (if available)
+    try:
+        # root.iconbitmap("icon.ico")  # If icon file exists
+        pass
+    except:
+        pass
+    
+    root.mainloop()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = PlaywrightCodeInterpreter(root)
-    root.mainloop()
+    main()
