@@ -466,7 +466,7 @@ export const test = base.extend<PlayWrightAiFixtureType & {{
   context: BrowserContext;
 }}>({{
   // 扩展fixture，添加browser和context
-  browser: async ({{}} , use) => {{
+  browser: async ({{ }}, use) => {{
     const browser = await chromium.launch({{
       headless: false,
       ignoreHTTPSErrors: true // 忽略HTTPS错误
