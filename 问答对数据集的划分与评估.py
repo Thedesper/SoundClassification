@@ -457,26 +457,47 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 
 ### Standard Template Structure:
 ```typescript
-import {{ test as base }} from '@playwright/test';
+import {{ test as base, chromium, Browser, BrowserContext }} from '@playwright/test';
 import type {{ PlayWrightAiFixtureType }} from '@midscene/web/playwright';
 import {{ PlaywrightAiFixture }} from '@midscene/web/playwright';
 
-export const test = base.extend<PlayWrightAiFixtureType>(PlaywrightAiFixture({{  waitForNetworkIdleTimeout: 2000,  ignoreHTTPSErrors: true,}}));
+export const test = base.extend<PlayWrightAiFixtureType & {{
+  browser: Browser;
+  context: BrowserContext;
+}}>({{
+  // 扩展fixture，添加browser和context
+  browser: async ({{}} , use) => {{
+    const browser = await chromium.launch({{
+      headless: false,
+      ignoreHTTPSErrors: true // 忽略HTTPS错误
+    }});
+    await use(browser);
+    await browser.close();
+  }},
+  context: async ({{ browser }}, use) => {{
+    const context = await browser.newContext({{
+      ignoreHTTPSErrors: true // 忽略HTTPS错误
+    }});
+    await use(context);
+    await context.close();
+  }},
+  // 使用自定义的PlaywrightAI fixture
+  ...PlaywrightAiFixture({{}})
+}});
 
-test.beforeEach(async ({{ page }}) => {{
+test.beforeEach(async ({{ page, context }}) => {{
+  // 不需要重新创建browser和context，使用fixture中创建的
   await page.goto('{base_url}');
   await page.setViewportSize({{ width: 1920, height: 1080 }});
 }});
 
 test('{test_name}', async ({{
+  aiAction,
+  aiTap,
   aiInput,
-  aiAssert,
-  aiQuery,
   aiKeyboardPress,
   aiHover,
-  aiTap,
   aiWaitFor,
-  aiAction,
   ai,
   page,
 }}) => {{
