@@ -19,6 +19,11 @@ import time
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.core.llms import ChatMessage
 
+# 使用相对路径和动态获取当前工作目录
+# 获取当前脚本所在目录
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = SCRIPT_DIR  # 当前脚本所在目录作为项目目录
+
 # Model configuration - removed unused variables
 
 class MidsceneCodeGenerator:
@@ -29,9 +34,9 @@ class MidsceneCodeGenerator:
         
         # Configuration variables
         self.config = {
-            "api_base": tk.StringVar(value="http://163.184.132.210/v1"),
-            "openai_model": tk.StringVar(value="Qwen2.5-VL-7B-Instruct"),  # OpenAI model
-            "openai_api_key": tk.StringVar(value="sk-lzzocxqz"),  # OpenAI API key - user should input their own key
+            "api_base": tk.StringVar(value="https://api.siliconflow.cn/v1"),
+            "openai_model": tk.StringVar(value="Qwen/Qwen2.5-VL-32B-Instruct"),  # OpenAI model
+            "openai_api_key": tk.StringVar(value="sk-ltoztgvvounfndpltgjhpgiargiddnozallzwdsaozzocxqz"),  # OpenAI API key - user should input their own key
             "base_url": tk.StringVar(value="https://example.com"),
             "test_name": tk.StringVar(value="example-test")
         }
@@ -527,7 +532,7 @@ Please generate complete, directly executable Midscene AI test code with all com
                 filename = filedialog.asksaveasfilename(
                     defaultextension=".spec.ts",
                     title="Save Midscene Test Code",
-                    initialfilename="generated-test.spec.ts"
+                    initialfile="generated-test.spec.ts"
                 )
             except Exception as dialog_error:
                 print(f"Debug - File dialog error: {dialog_error}")
@@ -818,22 +823,32 @@ export default defineConfig({
                 if not hasattr(self, 'saved_file_path') or not self.saved_file_path:
                     return  # User cancelled save dialog
             else:
-                # Use temp report location
-                self.report_dir = os.path.join(self.temp_test_dir, "midscene_run", "report")
+                # Use project directory for report location
+                self.report_dir = os.path.join(PROJECT_DIR, "midscene_run", "report")
                 os.makedirs(self.report_dir, exist_ok=True)
         
         try:
-            # Save code to temporary test file
-            test_file = os.path.join(self.temp_test_dir, "tests", "generated-test.spec.ts")
-            with open(test_file, 'w', encoding='utf-8') as f:
-                f.write(code)
+            # Check if there are existing test files in the project
+            existing_test_files = [f for f in os.listdir(PROJECT_DIR) if f.endswith('.spec.ts')]
+            
+            if existing_test_files:
+                # Use existing test files
+                test_pattern = "*.spec.ts"
+                self._log_execution(f"🚀 Starting test execution with existing test files: {existing_test_files}")
+            else:
+                # Save code to temporary test file
+                test_file = os.path.join(self.temp_test_dir, "tests", "generated-test.spec.ts")
+                os.makedirs(os.path.dirname(test_file), exist_ok=True)
+                with open(test_file, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                test_pattern = test_file
+                self._log_execution(f"📄 Test file: {test_file}")
             
             self._log_execution("🚀 Starting test execution...")
-            self._log_execution(f"📄 Test file: {test_file}")
             self._log_execution(f"📊 Reports will be saved to: {self.report_dir}")
             
             # Execute test in new thread
-            threading.Thread(target=self._execute_playwright_test, args=(test_file,), daemon=True).start()
+            threading.Thread(target=self._execute_playwright_test, args=(test_pattern,), daemon=True).start()
             
             # Update button states
             self.run_test_btn.config(state="disabled")
@@ -844,18 +859,27 @@ export default defineConfig({
             messagebox.showerror("Error", f"Error executing test: {str(e)}")
             self.status_bar.config(text="❌ Test execution failed")
     
-    def _execute_playwright_test(self, test_file):
+    def _execute_playwright_test(self, test_pattern):
         """Execute Playwright test"""
         try:
             import platform
             # Set up environment variables
             test_env = os.environ.copy()
             
+            # Determine working directory and test command
+            if test_pattern == "*.spec.ts":
+                # Running existing test files in the project directory
+                work_dir = PROJECT_DIR
+                test_cmd = [self._get_npx_command(), "playwright", "test", "--headed"]
+            else:
+                # Running generated test file in temp directory
+                work_dir = self.temp_test_dir
+                test_cmd = [self._get_npx_command(), "playwright", "test", test_pattern, "--headed"]
+            
             # Execute test with custom report location
-            npx_cmd = self._get_npx_command()
             self.execution_process = subprocess.Popen(
-                [npx_cmd, "playwright", "test", test_file, "--headed"],
-                cwd=self.temp_test_dir,
+                test_cmd,
+                cwd=work_dir,
                 env=test_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
