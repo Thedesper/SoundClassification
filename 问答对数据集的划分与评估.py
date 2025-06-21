@@ -34,9 +34,9 @@ class MidsceneCodeGenerator:
         
         # Configuration variables
         self.config = {
-            "api_base": tk.StringVar(value="http://163.184.132.210/v1"),
-            "openai_model": tk.StringVar(value="Qwen2.5-VL-7B-Instruct"),  # OpenAI model
-            "openai_api_key": tk.StringVar(value="sk-"),  # OpenAI API key - user should input their own key
+            "api_base": tk.StringVar(value="https://api.siliconflow.cn/v1"),
+            "openai_model": tk.StringVar(value="Pro/Qwen/Qwen2.5-VL-7B-Instruct"),  # OpenAI model
+            "openai_api_key": tk.StringVar(value="sk-ltoztgvvounfndpltgjhpgiargiddnozallzwdsaozzocxqz"),  # OpenAI API key - user should input their own key
             "base_url": tk.StringVar(value="https://example.com"),
             "test_name": tk.StringVar(value="example-test")
         }
@@ -563,9 +563,7 @@ Please generate complete, directly executable Midscene AI test code with all com
         if code.endswith("```"):
             code = code[:-3].rstrip()
         
-        # Ensure code contains necessary imports and structure
-        if "import { test as base }" not in code:
-            messagebox.showwarning("Warning", "Generated code may be incomplete, missing necessary import statements")
+        # Import check removed as requested
         
         return code
     
