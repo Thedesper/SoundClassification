@@ -29,9 +29,9 @@ class MidsceneCodeGenerator:
         
         # Configuration variables
         self.config = {
-            "api_base": tk.StringVar(value="https://api.siliconflow.cn/v1"),
-            "openai_model": tk.StringVar(value="Qwen/Qwen2.5-VL-72B-Instruct"),  # OpenAI model
-            "openai_api_key": tk.StringVar(value="sk-ltoztgvvounfndpltgjhpgiargiddnozallzwdsaozzocxqz"),  # OpenAI API key - user should input their own key
+            "api_base": tk.StringVar(value="http://163.184.132.210/v1"),
+            "openai_model": tk.StringVar(value="Qwen2.5-VL-7B-Instruct"),  # OpenAI model
+            "openai_api_key": tk.StringVar(value="sk-lzzocxqz"),  # OpenAI API key - user should input their own key
             "base_url": tk.StringVar(value="https://example.com"),
             "test_name": tk.StringVar(value="example-test")
         }
