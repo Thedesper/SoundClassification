@@ -872,6 +872,19 @@ export default defineConfig({
             # Always use temp_test_dir as working directory
             work_dir = self.temp_test_dir
             
+            # Convert absolute path to relative path for Windows compatibility
+            if os.path.isabs(test_pattern):
+                # Get relative path from work_dir
+                try:
+                    relative_test_pattern = os.path.relpath(test_pattern, work_dir)
+                    # On Windows, use forward slashes for better compatibility
+                    if platform.system() == "Windows":
+                        relative_test_pattern = relative_test_pattern.replace(os.sep, '/')
+                    test_pattern = relative_test_pattern
+                except ValueError:
+                    # If relative path calculation fails, use just the filename
+                    test_pattern = os.path.basename(test_pattern)
+            
             # Always run the specific generated test file
             test_cmd = [self._get_npx_command(), "playwright", "test", test_pattern, "--headed"]
             
