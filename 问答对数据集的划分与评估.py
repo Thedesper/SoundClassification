@@ -434,6 +434,12 @@ aiHover(locator: string): Promise<void>
 aiWaitFor(assertion: string): Promise<void>
 ```
 
+### IMPORTANT: Viewport and Page Operations:
+- For viewport size: Use `page.setViewportSize({{ width: number, height: number }})` (already included in beforeEach)
+- For navigation: Use `page.goto(url)` (already included in beforeEach)
+- DO NOT use `aiViewportSize` - this function does not exist
+- DO NOT use `aiGoto` - this function does not exist
+
 ### Standard Template Structure:
 ```typescript
 import {{ test as base }} from '@playwright/test';
@@ -467,6 +473,13 @@ test('{test_name}', async ({{
 Base URL: {base_url}
 Test Name: {test_name}
 Natural Language Description: {text}
+
+### Code Generation Rules:
+1. The test function body should ONLY contain the actual test steps using ai* functions
+2. DO NOT include page.goto() or page.setViewportSize() in the test function - these are already in beforeEach
+3. DO NOT use non-existent functions like aiViewportSize, aiGoto, aiNavigate
+4. Focus on the test actions described in the natural language description
+5. Use proper error handling and assertions
 
 Please generate complete, directly executable Midscene AI test code with all comments and strings in English:
             """
