@@ -412,29 +412,44 @@ Convert the following code to natural language instructions:
             # Create LLM with validation
             llm = self._create_text_to_code_chain()
             
-            # Build complete prompt
+            # Read API.md content to include in prompt
+            api_content = ""
+            try:
+                with open(os.path.join(os.getcwd(), "API.md"), "r", encoding="utf-8") as f:
+                    api_content = f.read()
+            except FileNotFoundError:
+                print("Warning: API.md not found, using basic API reference")
+                api_content = "Basic Midscene AI API reference not available"
+            
+            # Build complete prompt with API documentation
             prompt = f"""
 You are a professional Midscene AI test code generation expert. Generate high-quality TypeScript test code based on natural language descriptions.
 
+### Complete Midscene AI API Documentation:
+{api_content}
+
 ### Important Rules:
-1. **Strictly follow Midscene AI API specifications**
+1. **Strictly follow Midscene AI API specifications from the documentation above**
 2. **Generated code must be directly executable**
 3. **Use correct type definitions and import statements**
 4. **Include reasonable waits and assertions**
 5. **All code comments and strings must be in English**
+6. **Always use ignore_https_errors=True in browser context**
 
-### Midscene AI Function Signatures (Must strictly follow):
-```typescript
-aiInput(value: string, locator: string): Promise<void>
-aiTap(locator: string): Promise<void>  
-aiAssert(assertion: string): Promise<void>
-aiQuery<T>(queryObject: Record<string, string>): Promise<T>
-aiKeyboardPress(key: string, locator?: string): Promise<void>
-aiHover(locator: string): Promise<void>
-aiWaitFor(assertion: string): Promise<void>
-```
+### Key API Functions (from documentation above):
+- aiAction() or ai(): Perform series of UI actions with natural language
+- aiTap(): Click/tap elements
+- aiInput(): Input text into elements
+- aiQuery(): Extract data from UI
+- aiAssert(): Natural language assertions
+- aiWaitFor(): Wait for conditions
+- aiHover(): Hover over elements
+- aiKeyboardPress(): Press keyboard keys
+- aiScroll(): Scroll pages or elements
+- aiRightClick(): Right-click elements
 
-### IMPORTANT: Viewport and Page Operations:
+### IMPORTANT: Page Operations:
+- HTTPS errors are automatically ignored via environment variables
 - For viewport size: Use `page.setViewportSize({{ width: number, height: number }})` (already included in beforeEach)
 - For navigation: Use `page.goto(url)` (already included in beforeEach)
 - DO NOT use `aiViewportSize` - this function does not exist
@@ -463,6 +478,8 @@ test('{test_name}', async ({{
   aiHover,
   aiTap,
   aiWaitFor,
+  aiAction,
+  ai,
   page,
 }}) => {{
   // Test steps generated here
@@ -480,6 +497,9 @@ Natural Language Description: {text}
 3. DO NOT use non-existent functions like aiViewportSize, aiGoto, aiNavigate
 4. Focus on the test actions described in the natural language description
 5. Use proper error handling and assertions
+6. Prefer using aiAction() or ai() for complex multi-step operations
+7. Use specific ai* functions (aiTap, aiInput, etc.) for precise single actions
+8. HTTPS errors are automatically handled via environment variables
 
 Please generate complete, directly executable Midscene AI test code with all comments and strings in English:
             """
@@ -881,6 +901,8 @@ export default defineConfig({
             import shutil
             # Set up environment variables
             test_env = os.environ.copy()
+            # Set ignore HTTPS errors for temporary test environment
+            test_env['PLAYWRIGHT_IGNORE_HTTPS_ERRORS'] = '1'
             
             # Always use temp_test_dir as working directory
             work_dir = self.temp_test_dir
