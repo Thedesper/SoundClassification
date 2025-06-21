@@ -34,9 +34,9 @@ class MidsceneCodeGenerator:
         
         # Configuration variables
         self.config = {
-            "api_base": tk.StringVar(value="https://api.siliconflow.cn/v1"),
-            "openai_model": tk.StringVar(value="Qwen/Qwen2.5-VL-32B-Instruct"),  # OpenAI model
-            "openai_api_key": tk.StringVar(value="sk-ltoztgvvounfndpltgjhpgiargiddnozallzwdsaozzocxqz"),  # OpenAI API key - user should input their own key
+            "api_base": tk.StringVar(value="http://163.184.132.210/v1"),
+            "openai_model": tk.StringVar(value="Qwen2.5-VL-7B-Instruct"),  # OpenAI model
+            "openai_api_key": tk.StringVar(value="sk-"),  # OpenAI API key - user should input their own key
             "base_url": tk.StringVar(value="https://example.com"),
             "test_name": tk.StringVar(value="example-test")
         }
@@ -618,8 +618,8 @@ Please generate complete, directly executable Midscene AI test code with all com
                 },
                 "devDependencies": {
                     "@midscene/web": "^0.20.0",
-                    "@playwright/test": "^1.50.1",
-                    "@types/node": "^22.10.5"
+                    "@playwright/test": "^1.53.1",
+                    "@types/node": "^24.0.3"
                 },
                 "dependencies": {
                     "dotenv": "^16.4.7"
