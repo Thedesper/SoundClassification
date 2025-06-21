@@ -863,17 +863,29 @@ export default defineConfig({
         """Execute Playwright test"""
         try:
             import platform
+            import shutil
             # Set up environment variables
             test_env = os.environ.copy()
             
-            # Determine working directory and test command
+            # Always use temp_test_dir as working directory
+            work_dir = self.temp_test_dir
+            
+            # Determine test command based on test pattern
             if test_pattern == "*.spec.ts":
-                # Running existing test files in the project directory
-                work_dir = PROJECT_DIR
+                # Copy existing test files from project directory to temp directory
+                existing_test_files = [f for f in os.listdir(PROJECT_DIR) if f.endswith('.spec.ts')]
+                tests_dir = os.path.join(self.temp_test_dir, "tests")
+                os.makedirs(tests_dir, exist_ok=True)
+                
+                for test_file in existing_test_files:
+                    src_path = os.path.join(PROJECT_DIR, test_file)
+                    dst_path = os.path.join(tests_dir, test_file)
+                    shutil.copy2(src_path, dst_path)
+                    self._log_execution(f"📄 Copied test file: {test_file}")
+                
                 test_cmd = [self._get_npx_command(), "playwright", "test", "--headed"]
             else:
                 # Running generated test file in temp directory
-                work_dir = self.temp_test_dir
                 test_cmd = [self._get_npx_command(), "playwright", "test", test_pattern, "--headed"]
             
             # Execute test with custom report location
