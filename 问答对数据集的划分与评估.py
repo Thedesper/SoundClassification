@@ -527,12 +527,24 @@ Please generate complete, directly executable Midscene AI test code with all com
         try:
             from tkinter import filedialog
             
+            # Generate default filename with timestamp
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            test_name = self.config['test_name'].get().strip()
+            if test_name:
+                # Use test name as part of filename (sanitize for filesystem)
+                safe_test_name = "".join(c for c in test_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_test_name = safe_test_name.replace(' ', '_')
+                default_filename = f"midscene_test_{timestamp}_{safe_test_name}.spec.ts"
+            else:
+                default_filename = f"midscene_test_{timestamp}.spec.ts"
+            
             # Try using the simplified file dialog first
             try:
                 filename = filedialog.asksaveasfilename(
                     defaultextension=".spec.ts",
                     title="Save Midscene Test Code",
-                    initialfile="generated-test.spec.ts"
+                    initialfile=default_filename
                 )
             except Exception as dialog_error:
                 print(f"Debug - File dialog error: {dialog_error}")
@@ -809,48 +821,36 @@ export default defineConfig({
             messagebox.showwarning("Warning", "No code to execute")
             return
         
-        # Check if code has been saved (to determine report location)
-        if not hasattr(self, 'saved_file_path') or not self.saved_file_path:
-            # Code hasn't been saved, ask user to save first or use temp location
-            result = messagebox.askyesno(
-                "Save Code", 
-                "Code hasn't been saved yet. Do you want to save it first?\n\n"
-                "Yes: Save code and reports will be saved to the same location\n"
-                "No: Execute directly (reports will be saved to temp location)"
-            )
-            if result:
-                self._save_code()
-                if not hasattr(self, 'saved_file_path') or not self.saved_file_path:
-                    return  # User cancelled save dialog
-            else:
-                # Use project directory for report location
-                self.report_dir = os.path.join(PROJECT_DIR, "midscene_run", "report")
-                os.makedirs(self.report_dir, exist_ok=True)
-        
         try:
-            # Generate a unique filename with timestamp for the new test
+            # Generate default filename with timestamp
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            test_name = self.config['test_name'].get().strip() or "test"
-            # Clean test name for filename (remove special characters)
-            clean_test_name = "".join(c for c in test_name if c.isalnum() or c in (' ', '-', '_')).replace(' ', '-')
-            test_filename = f"midscene_test_{timestamp}_{clean_test_name}.spec.ts"
+            test_name = self.config['test_name'].get().strip()
+            if test_name:
+                # Use test name as part of filename (sanitize for filesystem)
+                safe_test_name = "".join(c for c in test_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_test_name = safe_test_name.replace(' ', '_')
+                default_filename = f"midscene_test_{timestamp}_{safe_test_name}.spec.ts"
+            else:
+                default_filename = f"midscene_test_{timestamp}.spec.ts"
             
-            # Always save and test only the generated code with unique name
-            test_file = os.path.join(self.temp_test_dir, "tests", test_filename)
+            # Always save and test only the generated code in temp directory
+            test_file = os.path.join(self.temp_test_dir, "tests", default_filename)
             os.makedirs(os.path.dirname(test_file), exist_ok=True)
             with open(test_file, 'w', encoding='utf-8') as f:
                 f.write(code)
-            test_pattern = test_file
-            self._log_execution(f"📄 Generated new test file: {test_filename}")
-            self._log_execution(f"📄 Testing only the new generated code: {test_file}")
-            self._log_execution("🚀 Starting test execution with new generated code only...")
             
-            self._log_execution("🚀 Starting test execution...")
+            # Set report directory
+            self.report_dir = os.path.join(PROJECT_DIR, "midscene_run", "report")
+            os.makedirs(self.report_dir, exist_ok=True)
+            
+            self._log_execution(f"📄 Generated test file: {default_filename}")
+            self._log_execution(f"📁 Test file saved to: {test_file}")
+            self._log_execution("🚀 Starting test execution with generated code only...")
             self._log_execution(f"📊 Reports will be saved to: {self.report_dir}")
             
             # Execute test in new thread
-            threading.Thread(target=self._execute_playwright_test, args=(test_pattern,), daemon=True).start()
+            threading.Thread(target=self._execute_playwright_test, args=(test_file,), daemon=True).start()
             
             # Update button states
             self.run_test_btn.config(state="disabled")
