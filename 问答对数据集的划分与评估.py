@@ -828,21 +828,23 @@ export default defineConfig({
                 os.makedirs(self.report_dir, exist_ok=True)
         
         try:
-            # Check if there are existing test files in the project
-            existing_test_files = [f for f in os.listdir(PROJECT_DIR) if f.endswith('.spec.ts')]
+            # Generate a unique filename with timestamp for the new test
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            test_name = self.config['test_name'].get().strip() or "test"
+            # Clean test name for filename (remove special characters)
+            clean_test_name = "".join(c for c in test_name if c.isalnum() or c in (' ', '-', '_')).replace(' ', '-')
+            test_filename = f"midscene_test_{timestamp}_{clean_test_name}.spec.ts"
             
-            if existing_test_files:
-                # Use existing test files
-                test_pattern = "*.spec.ts"
-                self._log_execution(f"🚀 Starting test execution with existing test files: {existing_test_files}")
-            else:
-                # Save code to temporary test file
-                test_file = os.path.join(self.temp_test_dir, "tests", "generated-test.spec.ts")
-                os.makedirs(os.path.dirname(test_file), exist_ok=True)
-                with open(test_file, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                test_pattern = test_file
-                self._log_execution(f"📄 Test file: {test_file}")
+            # Always save and test only the generated code with unique name
+            test_file = os.path.join(self.temp_test_dir, "tests", test_filename)
+            os.makedirs(os.path.dirname(test_file), exist_ok=True)
+            with open(test_file, 'w', encoding='utf-8') as f:
+                f.write(code)
+            test_pattern = test_file
+            self._log_execution(f"📄 Generated new test file: {test_filename}")
+            self._log_execution(f"📄 Testing only the new generated code: {test_file}")
+            self._log_execution("🚀 Starting test execution with new generated code only...")
             
             self._log_execution("🚀 Starting test execution...")
             self._log_execution(f"📊 Reports will be saved to: {self.report_dir}")
@@ -870,23 +872,8 @@ export default defineConfig({
             # Always use temp_test_dir as working directory
             work_dir = self.temp_test_dir
             
-            # Determine test command based on test pattern
-            if test_pattern == "*.spec.ts":
-                # Copy existing test files from project directory to temp directory
-                existing_test_files = [f for f in os.listdir(PROJECT_DIR) if f.endswith('.spec.ts')]
-                tests_dir = os.path.join(self.temp_test_dir, "tests")
-                os.makedirs(tests_dir, exist_ok=True)
-                
-                for test_file in existing_test_files:
-                    src_path = os.path.join(PROJECT_DIR, test_file)
-                    dst_path = os.path.join(tests_dir, test_file)
-                    shutil.copy2(src_path, dst_path)
-                    self._log_execution(f"📄 Copied test file: {test_file}")
-                
-                test_cmd = [self._get_npx_command(), "playwright", "test", "--headed"]
-            else:
-                # Running generated test file in temp directory
-                test_cmd = [self._get_npx_command(), "playwright", "test", test_pattern, "--headed"]
+            # Always run the specific generated test file
+            test_cmd = [self._get_npx_command(), "playwright", "test", test_pattern, "--headed"]
             
             # Execute test with custom report location
             self.execution_process = subprocess.Popen(
