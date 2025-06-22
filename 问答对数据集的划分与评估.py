@@ -444,9 +444,10 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 6. **Always use natural language descriptions for element location, NOT CSS selectors or XPath**
 7. **Use proper aiAssert syntax: await aiAssert('natural language assertion')**
 8. **DO NOT include page.goto() or page.setViewportSize() in test function - these are in beforeEach**
+9. **DO NOT use aiAction() for navigation - page navigation is handled in beforeEach**
+10. **Start test steps directly with UI interactions like aiTap, aiInput, etc.**
 
 ### Key API Functions:
-- aiAction() or ai(): Perform series of UI actions with natural language
 - aiTap('element description'): Click/tap elements
 - aiInput('text', 'element description'): Input text into elements
 - aiQuery({{key: 'description'}}): Extract data from UI
@@ -455,6 +456,7 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 - aiHover('element description'): Hover over elements
 - aiKeyboardPress('key', 'element description'): Press keyboard keys
 - aiScroll({{direction: 'up/down/left/right'}}, 'element description'): Scroll
+- ai('complex multi-step action description'): For complex actions only, avoid for simple navigation
 
 ### Standard Template Structure:
 ```typescript
@@ -503,6 +505,13 @@ Generate a complete Midscene AI test file based on this description:
 Base URL: {base_url}
 Test Name: {test_name}
 Test Description: {text}
+
+IMPORTANT CONSTRAINTS:
+1. DO NOT use aiAction() for page navigation or opening URLs - this is handled in beforeEach
+2. DO NOT include any Navigate actions in the test
+3. Start the test directly with UI interactions like aiTap, aiInput, etc.
+4. The page is already loaded and ready when the test starts
+5. Focus on the actual UI interactions described in the test description
 
 Please generate complete, directly executable Midscene AI test code following the template structure above.
 """
