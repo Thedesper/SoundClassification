@@ -435,6 +435,9 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 4. **Include reasonable waits and assertions**
 5. **All code comments and strings must be in English**
 6. **Always use ignore_https_errors=True in browser context**
+7. **CRITICAL: Avoid nested quotes in strings - use simple descriptions without quotes or backticks**
+8. **DO NOT include page.goto() or page.setViewportSize() in test function - these are in beforeEach**
+9. **Focus only on the actual test actions described in natural language**
 
 ### Key API Functions (from documentation above):
 - aiAction() or ai(): Perform series of UI actions with natural language
@@ -498,6 +501,8 @@ test('{test_name}', async ({{
   aiKeyboardPress,
   aiHover,
   aiWaitFor,
+  aiQuery,
+  aiAssert,
   ai,
   page,
 }}) => {{
@@ -519,6 +524,15 @@ Natural Language Description: {text}
 6. Prefer using aiAction() or ai() for complex multi-step operations
 7. Use specific ai* functions (aiTap, aiInput, etc.) for precise single actions
 8. HTTPS errors are automatically handled via environment variables
+
+### Code Generation Guidelines:
+- Use simple string literals without nested quotes
+- Avoid complex string interpolation in aiAction descriptions
+- Keep function calls clean and readable
+- Use aiInput('text', 'element description') format
+- Use aiTap('element description') format
+- Use aiAssert('simple assertion description') format
+- Example: await aiAction('Search for playwright'); NOT: await aiAction('Navigate to "url" using `method`');
 
 Please generate complete, directly executable Midscene AI test code with all comments and strings in English:
             """
