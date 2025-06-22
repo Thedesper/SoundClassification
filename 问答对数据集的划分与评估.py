@@ -271,6 +271,13 @@ Finally, check if the page title contains the "Playwright" keyword."""
         )
         self.stop_test_btn.pack(side=tk.LEFT)
         
+        self.open_report_btn = ttk.Button(
+            button_row2, 
+            text="📊 Open Latest Report", 
+            command=self._open_latest_report
+        )
+        self.open_report_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
         # Output area
         output_frame = ttk.LabelFrame(main_frame, text="Generated Midscene AI Test Code (.spec.ts)")
         output_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -421,8 +428,8 @@ Convert the following code to natural language instructions:
                 print("Warning: API.md not found, using basic API reference")
                 api_content = "Basic Midscene AI API reference not available"
             
-            # Build complete prompt with API documentation
-            prompt = f"""
+            # Build system prompt
+            system_prompt = f"""
 You are a professional Midscene AI test code generation expert. Generate high-quality TypeScript test code based on natural language descriptions.
 
 ### Complete Midscene AI API Documentation:
@@ -434,90 +441,34 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 3. **Use correct type definitions and import statements**
 4. **Include reasonable waits and assertions**
 5. **All code comments and strings must be in English**
-6. **Always use ignore_https_errors=True in browser context**
-7. **CRITICAL: Avoid nested quotes in strings - use simple descriptions without quotes or backticks**
+6. **Always use natural language descriptions for element location, NOT CSS selectors or XPath**
+7. **Use proper aiAssert syntax: await aiAssert('natural language assertion')**
 8. **DO NOT include page.goto() or page.setViewportSize() in test function - these are in beforeEach**
-9. **Focus only on the actual test actions described in natural language**
 
-### Key API Functions (from documentation above):
+### Key API Functions:
 - aiAction() or ai(): Perform series of UI actions with natural language
-- aiTap(): Click/tap elements
-- aiInput(): Input text into elements
-- aiQuery(): Extract data from UI
-- aiAssert(): Natural language assertions
-- aiWaitFor(): Wait for conditions
-- aiHover(): Hover over elements
-- aiKeyboardPress(): Press keyboard keys
-- aiScroll(): Scroll pages or elements
-- aiRightClick(): Right-click elements
-
-### IMPORTANT: Page Operations:
-- HTTPS errors are automatically ignored via environment variables
-- For viewport size: Use `page.setViewportSize({{ width: number, height: number }})` (already included in beforeEach)
-- For navigation: Use `page.goto(url)` (already included in beforeEach)
-- DO NOT use `aiViewportSize` - this function does not exist
-- DO NOT use `aiGoto` - this function does not exist
+- aiTap('element description'): Click/tap elements
+- aiInput('text', 'element description'): Input text into elements
+- aiQuery({{key: 'description'}}): Extract data from UI
+- aiAssert('assertion description'): Natural language assertions
+- aiWaitFor('condition description'): Wait for conditions
+- aiHover('element description'): Hover over elements
+- aiKeyboardPress('key', 'element description'): Press keyboard keys
+- aiScroll({{direction: 'up/down/left/right'}}, 'element description'): Scroll
 
 ### Standard Template Structure:
 ```typescript
-import {{ test as base, chromium, Browser, BrowserContext }} from '@playwright/test';
+import {{ test as base }} from '@playwright/test';
 import type {{ PlayWrightAiFixtureType }} from '@midscene/web/playwright';
 import {{ PlaywrightAiFixture }} from '@midscene/web/playwright';
 
-// 自定义动作映射 - 将Navigate映射到page.goto
-const actionMappings = {{
-  Navigate: async (page, url) => {{
-    await page.goto(url, {{
-      timeout: 60000,
-      waitUntil: 'networkidle'
-    }});
-  }}
-}};
-
-export const test = base.extend<PlayWrightAiFixtureType & {{
-  browser: Browser;
-  context: BrowserContext;
-}}>({{
-  browser: async ({{ }}, use) => {{
-    const browser = await chromium.launch({{
-      headless: false,
-      ignoreHTTPSErrors: true
-    }});
-    await use(browser);
-    await browser.close();
-  }},
-  context: async ({{ browser }}, use) => {{
-    const context = await browser.newContext({{
-      ignoreHTTPSErrors: true,
-      viewport: {{ width: 1440, height: 900 }},
-      networkIdleTimeout: 30000 // 网络空闲超时时间(ms)
-    }});
-    await use(context);
-    await context.close();
-  }},
-  ...PlaywrightAiFixture({{
-    // Midscene配置
-    midsceneConfig: {{
-      network: {{
-        timeout: 30000, // 网络请求超时时间
-        idleTime: 2000  // 网络空闲判定时间
-      }},
-      screenshot: {{
-        maxWidth: 1440,
-        maxHeight: 900
-      }},
-      // 注册自定义动作处理器
-      actionMappings: actionMappings
-    }}
-  }})
-}});
+export const test = base.extend<PlayWrightAiFixtureType>(PlaywrightAiFixture({{
+  waitForNetworkIdleTimeout: 2000,
+  ignoreHTTPSErrors: true,
+}}));
 
 test.beforeEach(async ({{ page }}) => {{
-  // 导航到指定页面 - 使用page.goto替代aiAction
-  await page.goto('{base_url}', {{
-    timeout: 60000,
-    waitUntil: 'networkidle'
-  }});
+  await page.goto('{base_url}');
   await page.setViewportSize({{ width: 1440, height: 900 }});
 }});
 
@@ -533,43 +484,44 @@ test('{test_name}', async ({{
   ai,
   page,
 }}) => {{
-  // Test steps generated here
+  // Test steps will be generated here
 }});
 ```
 
-### Current Task:
+### Code Generation Guidelines:
+- Use natural language descriptions for all element locations
+- Example: await aiInput('playwright', 'search input box') NOT await aiInput('playwright', '#search')
+- Example: await aiAssert('search results contain playwright') NOT await aiAssert(results.includes('playwright'))
+- Keep function calls clean and readable
+- Use proper waiting strategies with aiWaitFor
+"""
+            
+            # Build user prompt
+            user_prompt = f"""
+Generate a complete Midscene AI test file based on this description:
+
 Base URL: {base_url}
 Test Name: {test_name}
-Natural Language Description: {text}
+Test Description: {text}
 
-### Code Generation Rules:
-1. The test function body should ONLY contain the actual test steps using ai* functions
-2. DO NOT include page.goto() or page.setViewportSize() in the test function - these are already in beforeEach
-3. DO NOT use non-existent functions like aiViewportSize, aiGoto, aiNavigate
-4. Focus on the test actions described in the natural language description
-5. Use proper error handling and assertions
-6. Prefer using aiAction() or ai() for complex multi-step operations
-7. Use specific ai* functions (aiTap, aiInput, etc.) for precise single actions
-8. HTTPS errors are automatically handled via environment variables
-
-### Code Generation Guidelines:
-- Use simple string literals without nested quotes
-- Avoid complex string interpolation in aiAction descriptions
-- Keep function calls clean and readable
-- Use aiInput('text', 'element description') format
-- Use aiTap('element description') format
-- Use aiAssert('simple assertion description') format
-- Example: await aiAction('Search for playwright'); NOT: await aiAction('Navigate to "url" using `method`');
-
-Please generate complete, directly executable Midscene AI test code with all comments and strings in English:
-            """
+Please generate complete, directly executable Midscene AI test code following the template structure above.
+"""
             
-            # Call LLM with complete prompt
-            result = llm.complete(prompt)
+            # Create messages for chat API
+            messages = [
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=user_prompt)
+            ]
             
-            # Extract content from CompletionResponse
-            if hasattr(result, 'text'):
-                cleaned_code = self._clean_generated_code(result.text)
+            print(f"Debug - Sending to LLM: {user_prompt[:100]}...")
+            
+            # Call LLM with chat API (consistent with code_to_text)
+            result = llm.chat(messages)
+            print(f"Debug - LLM response type: {type(result)}")
+            
+            # Extract content from ChatResponse
+            if hasattr(result, 'message') and hasattr(result.message, 'content'):
+                cleaned_code = self._clean_generated_code(result.message.content)
             else:
                 cleaned_code = self._clean_generated_code(str(result))
             
@@ -591,7 +543,7 @@ Please generate complete, directly executable Midscene AI test code with all com
             else:
                 messagebox.showerror("Error", f"Error generating code: {error_msg}")
             self.status_bar.config(text="❌ Code generation failed")
-            print(f"Debug - Error details: {e}")  # 添加错误详情打印
+            print(f"Debug - Error details: {e}")
     
     def _clean_generated_code(self, code):
         """Clean generated code"""
@@ -1038,21 +990,51 @@ export default defineConfig({
                 
                 # Copy all files from temp report dir to project report dir
                 import shutil
+                latest_report_file = None
+                latest_time = 0
+                
                 for item in os.listdir(self.report_dir):
                     src_path = os.path.join(self.report_dir, item)
                     dst_path = os.path.join(project_report_dir, item)
                     
                     if os.path.isfile(src_path):
                         shutil.copy2(src_path, dst_path)
+                        # Track the latest HTML report file
+                        if item.endswith('.html'):
+                            file_time = os.path.getmtime(src_path)
+                            if file_time > latest_time:
+                                latest_time = file_time
+                                latest_report_file = dst_path
                     elif os.path.isdir(src_path):
                         if os.path.exists(dst_path):
                             shutil.rmtree(dst_path)
                         shutil.copytree(src_path, dst_path)
                 
-                self._log_execution(f"📋 Report also saved to project directory: {project_report_dir}")
+                self._log_execution(f"📋 Report saved to project directory: {project_report_dir}")
+                
+                # Create a convenient shortcut to the latest report
+                if latest_report_file:
+                    shortcut_path = os.path.join(PROJECT_DIR, "latest_test_report.html")
+                    try:
+                        if os.path.exists(shortcut_path):
+                            os.remove(shortcut_path)
+                        shutil.copy2(latest_report_file, shortcut_path)
+                        self._log_execution(f"📄 Latest report copied to: {shortcut_path}")
+                        self._log_execution(f"💡 Tip: Double-click 'latest_test_report.html' in project root to view the report")
+                    except Exception as e:
+                        self._log_execution(f"⚠️ Warning: Failed to create report shortcut: {str(e)}")
                 
                 # Update report_dir to point to project directory for opening
                 self.project_report_dir = project_report_dir
+                
+                # List all report files for user reference
+                report_files = [f for f in os.listdir(project_report_dir) if f.endswith('.html')]
+                if report_files:
+                    self._log_execution(f"📊 Available report files ({len(report_files)}):")
+                    for i, report_file in enumerate(sorted(report_files, reverse=True)[:3]):  # Show latest 3
+                        self._log_execution(f"   {i+1}. {report_file}")
+                    if len(report_files) > 3:
+                        self._log_execution(f"   ... and {len(report_files) - 3} more files")
                 
         except Exception as e:
             self._log_execution(f"⚠️ Warning: Failed to copy report to project directory: {str(e)}")
@@ -1077,30 +1059,120 @@ export default defineConfig({
         report_path = getattr(self, 'project_report_dir', None) or getattr(self, 'report_dir', None)
         
         if report_path and os.path.exists(report_path):
-            # Show both locations if project report exists
-            message = f"Test execution completed!\n\n"
-            if hasattr(self, 'project_report_dir') and self.project_report_dir:
-                message += f"Report saved to project directory:\n{self.project_report_dir}\n\n"
-                if hasattr(self, 'report_dir') and self.report_dir != self.project_report_dir:
-                    message += f"Temp report location:\n{self.report_dir}\n\n"
-            else:
-                message += f"Report saved to:\n{report_path}\n\n"
+            # Check for latest_test_report.html in project root
+            latest_report_shortcut = os.path.join(PROJECT_DIR, "latest_test_report.html")
             
-            message += "Do you want to open the report folder?"
+            # Show both locations if project report exists
+            message = f"🎉 Test execution completed!\n\n"
+            
+            if os.path.exists(latest_report_shortcut):
+                message += f"📄 Quick Access: 'latest_test_report.html' in project root\n"
+                message += f"📁 Full reports folder: {report_path}\n\n"
+                message += f"💡 You can:\n"
+                message += f"   • Double-click 'latest_test_report.html' for latest results\n"
+                message += f"   • Browse '{os.path.basename(report_path)}' folder for all reports\n\n"
+            else:
+                if hasattr(self, 'project_report_dir') and self.project_report_dir:
+                    message += f"📁 Report saved to project directory:\n{self.project_report_dir}\n\n"
+                    if hasattr(self, 'report_dir') and self.report_dir != self.project_report_dir:
+                        message += f"📁 Temp report location:\n{self.report_dir}\n\n"
+                else:
+                    message += f"📁 Report saved to:\n{report_path}\n\n"
+            
+            message += "Do you want to open the report folder now?"
             
             result = messagebox.askyesno("Test Report", message)
             if result:
                 try:
                     import platform
                     system = platform.system()
+                    # Try to open the project root directory first if shortcut exists
+                    open_path = PROJECT_DIR if os.path.exists(latest_report_shortcut) else report_path
+                    
                     if system == "Darwin":  # macOS
-                        subprocess.run(["open", report_path])
+                        subprocess.run(["open", open_path])
                     elif system == "Windows":
-                        subprocess.run(["explorer", report_path])
+                        subprocess.run(["explorer", open_path])
                     elif system == "Linux":
-                        subprocess.run(["xdg-open", report_path])
+                        subprocess.run(["xdg-open", open_path])
+                        
+                    # Additional message about the shortcut
+                    if os.path.exists(latest_report_shortcut):
+                        self._log_execution(f"📂 Opened project directory. Look for 'latest_test_report.html'")
+                        
                 except Exception as e:
                     self._log_execution(f"❌ Error opening report folder: {str(e)}")
+        else:
+            messagebox.showwarning("No Report", "No test report found. Please run a test first.")
+            self._log_execution("❌ No test report found to display")
+    
+    def _open_latest_report(self):
+        """Open the latest test report"""
+        try:
+            # First check for the shortcut in project root
+            latest_report_shortcut = os.path.join(PROJECT_DIR, "latest_test_report.html")
+            
+            if os.path.exists(latest_report_shortcut):
+                # Open the shortcut file directly
+                self._open_file_in_browser(latest_report_shortcut)
+                self._log_execution(f"📊 Opened latest test report: latest_test_report.html")
+                return
+            
+            # If no shortcut, look in the project report directory
+            project_report_dir = os.path.join(PROJECT_DIR, "midscene_run", "report")
+            if os.path.exists(project_report_dir):
+                html_files = [f for f in os.listdir(project_report_dir) if f.endswith('.html')]
+                if html_files:
+                    # Find the most recent HTML file
+                    latest_file = None
+                    latest_time = 0
+                    for html_file in html_files:
+                        file_path = os.path.join(project_report_dir, html_file)
+                        file_time = os.path.getmtime(file_path)
+                        if file_time > latest_time:
+                            latest_time = file_time
+                            latest_file = file_path
+                    
+                    if latest_file:
+                        self._open_file_in_browser(latest_file)
+                        self._log_execution(f"📊 Opened latest test report: {os.path.basename(latest_file)}")
+                        return
+            
+            # No reports found
+            messagebox.showinfo("No Report", 
+                              "No test reports found.\n\n"
+                              "Please run a test first to generate a report.\n"
+                              "Reports will be saved to 'midscene_run/report/' directory.")
+            self._log_execution("❌ No test reports found to open")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error opening report: {str(e)}")
+            self._log_execution(f"❌ Error opening latest report: {str(e)}")
+    
+    def _open_file_in_browser(self, file_path):
+        """Open a file in the default browser"""
+        import platform
+        import webbrowser
+        
+        try:
+            # Convert to absolute path
+            abs_path = os.path.abspath(file_path)
+            
+            # Use webbrowser module for cross-platform compatibility
+            webbrowser.open(f"file://{abs_path}")
+            
+        except Exception as e:
+            # Fallback to system-specific commands
+            system = platform.system()
+            try:
+                if system == "Darwin":  # macOS
+                    subprocess.run(["open", file_path])
+                elif system == "Windows":
+                    subprocess.run(["start", file_path], shell=True)
+                elif system == "Linux":
+                    subprocess.run(["xdg-open", file_path])
+            except Exception as e2:
+                raise Exception(f"Failed to open file: {str(e)} (fallback also failed: {str(e2)})")
     
     def _log_execution(self, message):
         """Log execution messages"""
@@ -1120,7 +1192,7 @@ export default defineConfig({
         self.config["base_url"].set("https://cn.bing.com")
         self.config["test_name"].set("search playwright on bing")
         
-        # Load example code
+        # Load example code with correct Midscene API usage
         example_code = """import { test as base } from '@playwright/test';
 import type { PlayWrightAiFixtureType } from '@midscene/web/playwright';
 import { PlaywrightAiFixture } from '@midscene/web/playwright';
@@ -1132,7 +1204,7 @@ export const test = base.extend<PlayWrightAiFixtureType>(PlaywrightAiFixture({
 
 test.beforeEach(async ({ page }) => {
   await page.goto('https://cn.bing.com');
-  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.setViewportSize({ width: 1440, height: 900 });
 });
 
 test('search playwright on bing', async ({
@@ -1141,16 +1213,19 @@ test('search playwright on bing', async ({
   aiQuery,
   aiTap,
   aiWaitFor,
+  aiKeyboardPress,
   page,
 }) => {
-  // Input search keyword and execute search
+  // Input search keyword using natural language description
   await aiInput('playwright', 'search input box');
+  
+  // Press Enter to execute search
   await aiKeyboardPress('Enter');
   
   // Wait for search results to load
   await aiWaitFor('search results are displayed');
   
-  // Extract search results
+  // Extract search results using natural language descriptions
   const searchResults = await aiQuery({
     titles: 'search result titles as string array',
     firstResultTitle: 'first search result title as string'
@@ -1158,8 +1233,8 @@ test('search playwright on bing', async ({
   
   console.log('Search results:', searchResults);
   
-  // Verify search results
-  await aiAssert('search results contain "playwright" related content');
+  // Verify search results using natural language assertions
+  await aiAssert('search results contain playwright related content');
   await aiAssert('there are more than 1 search results');
 });"""
         
