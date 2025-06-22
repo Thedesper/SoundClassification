@@ -464,34 +464,61 @@ import {{ test as base, chromium, Browser, BrowserContext }} from '@playwright/t
 import type {{ PlayWrightAiFixtureType }} from '@midscene/web/playwright';
 import {{ PlaywrightAiFixture }} from '@midscene/web/playwright';
 
+// 自定义动作映射 - 将Navigate映射到page.goto
+const actionMappings = {{
+  Navigate: async (page, url) => {{
+    await page.goto(url, {{
+      timeout: 60000,
+      waitUntil: 'networkidle'
+    }});
+  }}
+}};
+
 export const test = base.extend<PlayWrightAiFixtureType & {{
   browser: Browser;
   context: BrowserContext;
 }}>({{
-  // 扩展fixture，添加browser和context
   browser: async ({{ }}, use) => {{
     const browser = await chromium.launch({{
       headless: false,
-      ignoreHTTPSErrors: true // 忽略HTTPS错误
+      ignoreHTTPSErrors: true
     }});
     await use(browser);
     await browser.close();
   }},
   context: async ({{ browser }}, use) => {{
     const context = await browser.newContext({{
-      ignoreHTTPSErrors: true // 忽略HTTPS错误
+      ignoreHTTPSErrors: true,
+      viewport: {{ width: 1440, height: 900 }},
+      networkIdleTimeout: 30000 // 网络空闲超时时间(ms)
     }});
     await use(context);
     await context.close();
   }},
-  // 使用自定义的PlaywrightAI fixture
-  ...PlaywrightAiFixture({{}})
+  ...PlaywrightAiFixture({{
+    // Midscene配置
+    midsceneConfig: {{
+      network: {{
+        timeout: 30000, // 网络请求超时时间
+        idleTime: 2000  // 网络空闲判定时间
+      }},
+      screenshot: {{
+        maxWidth: 1440,
+        maxHeight: 900
+      }},
+      // 注册自定义动作处理器
+      actionMappings: actionMappings
+    }}
+  }})
 }});
 
-test.beforeEach(async ({{ page, context }}) => {{
-  // 不需要重新创建browser和context，使用fixture中创建的
-  await page.goto('{base_url}');
-  await page.setViewportSize({{ width: 1920, height: 1080 }});
+test.beforeEach(async ({{ page }}) => {{
+  // 导航到指定页面 - 使用page.goto替代aiAction
+  await page.goto('{base_url}', {{
+    timeout: 60000,
+    waitUntil: 'networkidle'
+  }});
+  await page.setViewportSize({{ width: 1440, height: 900 }});
 }});
 
 test('{test_name}', async ({{
@@ -725,6 +752,7 @@ MIDSCENE_MODEL_NAME={self.config["openai_model"].get()}
             # Create playwright.config.ts with dynamic report output path
             playwright_config = '''import { defineConfig, devices } from '@playwright/test';
 import dotenv from 'dotenv';
+import path from 'path';
 
 // Load .env file
 dotenv.config();
@@ -738,10 +766,13 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: [
     ["list"], 
-    ["@midscene/web/playwright-report"]
+    ["@midscene/web/playwright-report", {
+      outputFolder: path.join(process.cwd(), 'midscene_run', 'report')
+    }]
   ],
   use: {
     trace: 'on-first-retry',
+    ignoreHTTPSErrors: true,
   },
   projects: [
     {
@@ -904,8 +935,8 @@ export default defineConfig({
             with open(test_file, 'w', encoding='utf-8') as f:
                 f.write(code)
             
-            # Set report directory
-            self.report_dir = os.path.join(PROJECT_DIR, "midscene_run", "report")
+            # Set report directory in temp test directory
+            self.report_dir = os.path.join(self.temp_test_dir, "midscene_run", "report")
             os.makedirs(self.report_dir, exist_ok=True)
             
             self._log_execution(f"📄 Generated test file: {default_filename}")
@@ -977,6 +1008,10 @@ export default defineConfig({
             if return_code == 0:
                 self.root.after(0, lambda: self._log_execution("✅ Test execution successful"))
                 self.root.after(0, lambda: self._log_execution(f"📊 Test report saved to: {self.report_dir}"))
+                
+                # Copy report to project root directory for persistent access
+                self.root.after(0, self._copy_report_to_project)
+                
                 self.root.after(0, lambda: self.status_bar.config(text="✅ Test execution completed"))
                 # Try to open report folder
                 self.root.after(0, self._show_report_location)
@@ -992,6 +1027,35 @@ export default defineConfig({
             self.root.after(0, lambda: self.run_test_btn.config(state="normal"))
             self.root.after(0, lambda: self.stop_test_btn.config(state="disabled"))
             self.execution_process = None
+    
+    def _copy_report_to_project(self):
+        """Copy report from temp directory to project root directory"""
+        try:
+            if hasattr(self, 'report_dir') and self.report_dir and os.path.exists(self.report_dir):
+                # Create project report directory
+                project_report_dir = os.path.join(PROJECT_DIR, "midscene_run", "report")
+                os.makedirs(project_report_dir, exist_ok=True)
+                
+                # Copy all files from temp report dir to project report dir
+                import shutil
+                for item in os.listdir(self.report_dir):
+                    src_path = os.path.join(self.report_dir, item)
+                    dst_path = os.path.join(project_report_dir, item)
+                    
+                    if os.path.isfile(src_path):
+                        shutil.copy2(src_path, dst_path)
+                    elif os.path.isdir(src_path):
+                        if os.path.exists(dst_path):
+                            shutil.rmtree(dst_path)
+                        shutil.copytree(src_path, dst_path)
+                
+                self._log_execution(f"📋 Report also saved to project directory: {project_report_dir}")
+                
+                # Update report_dir to point to project directory for opening
+                self.project_report_dir = project_report_dir
+                
+        except Exception as e:
+            self._log_execution(f"⚠️ Warning: Failed to copy report to project directory: {str(e)}")
     
     def _stop_test(self):
         """Stop test execution"""
@@ -1009,23 +1073,32 @@ export default defineConfig({
     
     def _show_report_location(self):
         """Show report location to user"""
-        if hasattr(self, 'report_dir') and self.report_dir and os.path.exists(self.report_dir):
-            result = messagebox.askyesno(
-                "Test Report", 
-                f"Test execution completed!\n\n"
-                f"Report saved to:\n{self.report_dir}\n\n"
-                f"Do you want to open the report folder?"
-            )
+        # Prefer project report directory if available
+        report_path = getattr(self, 'project_report_dir', None) or getattr(self, 'report_dir', None)
+        
+        if report_path and os.path.exists(report_path):
+            # Show both locations if project report exists
+            message = f"Test execution completed!\n\n"
+            if hasattr(self, 'project_report_dir') and self.project_report_dir:
+                message += f"Report saved to project directory:\n{self.project_report_dir}\n\n"
+                if hasattr(self, 'report_dir') and self.report_dir != self.project_report_dir:
+                    message += f"Temp report location:\n{self.report_dir}\n\n"
+            else:
+                message += f"Report saved to:\n{report_path}\n\n"
+            
+            message += "Do you want to open the report folder?"
+            
+            result = messagebox.askyesno("Test Report", message)
             if result:
                 try:
                     import platform
                     system = platform.system()
                     if system == "Darwin":  # macOS
-                        subprocess.run(["open", self.report_dir])
+                        subprocess.run(["open", report_path])
                     elif system == "Windows":
-                        subprocess.run(["explorer", self.report_dir])
+                        subprocess.run(["explorer", report_path])
                     elif system == "Linux":
-                        subprocess.run(["xdg-open", self.report_dir])
+                        subprocess.run(["xdg-open", report_path])
                 except Exception as e:
                     self._log_execution(f"❌ Error opening report folder: {str(e)}")
     
