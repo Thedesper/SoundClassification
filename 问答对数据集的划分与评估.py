@@ -422,10 +422,24 @@ Convert the following code to natural language instructions:
             # Read API.md content to include in prompt
             api_content = ""
             try:
-                with open(os.path.join(os.getcwd(), "API.md"), "r", encoding="utf-8") as f:
-                    api_content = f.read()
-            except FileNotFoundError:
-                print("Warning: API.md not found, using basic API reference")
+                # Try multiple possible locations for API.md
+                api_paths = [
+                    os.path.join(PROJECT_DIR, "API.md"),
+                    os.path.join(os.getcwd(), "API.md"),
+                    os.path.join(SCRIPT_DIR, "API.md")
+                ]
+                
+                for api_path in api_paths:
+                    if os.path.exists(api_path):
+                        with open(api_path, "r", encoding="utf-8") as f:
+                            api_content = f.read()
+                        print(f"Debug - Successfully loaded API.md from: {api_path}")
+                        break
+                else:
+                    print("Warning: API.md not found in any expected location")
+                    api_content = "Basic Midscene AI API reference not available"
+            except Exception as e:
+                print(f"Warning: Error reading API.md: {e}")
                 api_content = "Basic Midscene AI API reference not available"
             
             # Build system prompt
