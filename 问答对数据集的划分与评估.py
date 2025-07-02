@@ -38,7 +38,10 @@ class MidsceneCodeGenerator:
             "openai_model": tk.StringVar(value="Pro/Qwen/Qwen2.5-VL-7B-Instruct"),  # OpenAI model
             "openai_api_key": tk.StringVar(value="sk-ltoztgvvounfndpltgjhpgiargiddnozallzwdsaozzocxqz"),  # OpenAI API key - user should input their own key
             "base_url": tk.StringVar(value="https://example.com"),
-            "test_name": tk.StringVar(value="example-test")
+            "test_name": tk.StringVar(value="example-test"),
+            # Recording related configuration
+            "enable_recording": tk.BooleanVar(value=True),
+            "recording_output_dir": tk.StringVar(value="recordings")
         }
         
         # Execution related variables
@@ -46,6 +49,9 @@ class MidsceneCodeGenerator:
         self.temp_test_dir = None
         self.saved_file_path = None
         self.report_dir = None  # Report directory for test results
+        # Recording related variables
+        self.recording_process = None
+        self.recording_file_path = None
         
         # Set theme
         self.style = ttk.Style()
@@ -139,6 +145,15 @@ class MidsceneCodeGenerator:
         api_key_entry = ttk.Entry(config_grid, textvariable=self.config["openai_api_key"], width=50, show="*")
         api_key_entry.grid(row=4, column=1, sticky=tk.W)
         
+        # 新增录制配置
+        ttk.Label(config_grid, text="Enable Recording:").grid(row=5, column=0, sticky=tk.W, padx=(0, 10))
+        recording_checkbox = ttk.Checkbutton(config_grid, variable=self.config["enable_recording"])
+        recording_checkbox.grid(row=5, column=1, sticky=tk.W)
+        
+        ttk.Label(config_grid, text="Recording Output Dir:").grid(row=6, column=0, sticky=tk.W, padx=(0, 10))
+        recording_dir_entry = ttk.Entry(config_grid, textvariable=self.config["recording_output_dir"], width=50)
+        recording_dir_entry.grid(row=6, column=1, sticky=tk.W)
+        
         # Add OpenAI configuration tips
         openai_tips = ttk.Label(
             config_grid, 
@@ -146,7 +161,7 @@ class MidsceneCodeGenerator:
             font=("Arial", 9),
             foreground="blue"
         )
-        openai_tips.grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        openai_tips.grid(row=7, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
         
         # Create input area - using left-right split
         input_container = ttk.Frame(main_frame)
@@ -277,6 +292,25 @@ Finally, check if the page title contains the "Playwright" keyword."""
             command=self._open_latest_report
         )
         self.open_report_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Third row buttons: recording controls
+        button_row3 = ttk.Frame(button_frame)
+        button_row3.pack(fill=tk.X, pady=(5, 0))
+        
+        self.start_recording_btn = ttk.Button(
+            button_row3, 
+            text="🎬 Start Recording", 
+            command=self._start_recording
+        )
+        self.start_recording_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.stop_recording_btn = ttk.Button(
+            button_row3, 
+            text="⏹️ Stop Recording", 
+            command=self._stop_recording,
+            state="disabled"
+        )
+        self.stop_recording_btn.pack(side=tk.LEFT)
         
         # Output area
         output_frame = ttk.LabelFrame(main_frame, text="Generated Midscene AI Test Code (.spec.ts)")
@@ -891,6 +925,28 @@ export default defineConfig({
             messagebox.showwarning("Warning", "No code to execute")
             return
         
+        # Check if recording is enabled and prompt user
+        if self.config["enable_recording"].get() and not self.recording_process:
+            result = messagebox.askyesno(
+                "Recording Available", 
+                "Recording is enabled but not started.\n\n"
+                "Would you like to start recording before running the test?\n\n"
+                "This will help you capture user interactions for future test generation."
+            )
+            if result:
+                self._start_recording()
+                # Give user time to start recording
+                messagebox.showinfo(
+                    "Recording Started", 
+                    "Recording has been started!\n\n"
+                    "You can now interact with the browser to record actions.\n"
+                    "Click OK to continue with test execution."
+                )
+        
+        # Log recording status
+        if self.recording_process:
+            self._log_execution("🎥 Recording is active during test execution")
+        
         try:
             # Generate default filename with timestamp
             import datetime
@@ -1075,6 +1131,14 @@ export default defineConfig({
                 self.run_test_btn.config(state="normal")
                 self.stop_test_btn.config(state="disabled")
                 self.execution_process = None
+        
+        # Also stop recording if it's active
+        if self.recording_process:
+            try:
+                self._log_execution("🎥 Stopping recording process...")
+                self._stop_recording()
+            except Exception as e:
+                self._log_execution(f"❌ Error stopping recording: {str(e)}")
     
     def _show_report_location(self):
         """Show report location to user"""
@@ -1369,6 +1433,93 @@ Please ensure each step has appropriate waiting and verification mechanisms."""
             self._log_execution(message)
         
         return is_ok
+    
+    def _start_recording(self):
+        """启动 Playwright codegen 录制"""
+        if self.recording_process:
+            messagebox.showwarning("Warning", "Recording is already in progress")
+            return
+        
+        try:
+            # 创建录制输出目录
+            recording_dir = self.config["recording_output_dir"].get()
+            if not os.path.isabs(recording_dir):
+                recording_dir = os.path.join(PROJECT_DIR, recording_dir)
+            os.makedirs(recording_dir, exist_ok=True)
+            
+            # 生成录制文件名
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.recording_file_path = os.path.join(recording_dir, f"recorded_test_{timestamp}.spec.ts")
+            
+            # 启动 Playwright codegen
+            base_url = self.config["base_url"].get() or "https://example.com"
+            cmd = [self._get_npx_command(), "playwright", "codegen", base_url, "--output", self.recording_file_path]
+            
+            self.recording_process = subprocess.Popen(cmd, cwd=PROJECT_DIR)
+            
+            # 更新UI状态
+            self.start_recording_btn.config(state="disabled")
+            self.stop_recording_btn.config(state="normal")
+            self.status_bar.config(text=f"🎬 Recording started - Output: {os.path.basename(self.recording_file_path)}")
+            self._log_execution(f"🎬 Started Playwright codegen recording")
+            self._log_execution(f"📁 Recording file: {self.recording_file_path}")
+            self._log_execution(f"🌐 Target URL: {base_url}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start recording: {str(e)}")
+            self.status_bar.config(text="❌ Recording start failed")
+    
+    def _stop_recording(self):
+        """停止录制并可选择加载录制的代码"""
+        if not self.recording_process:
+            messagebox.showwarning("Warning", "No recording in progress")
+            return
+        
+        try:
+            # 终止录制进程
+            self.recording_process.terminate()
+            self.recording_process.wait(timeout=5)
+            
+            # 更新UI状态
+            self.start_recording_btn.config(state="normal")
+            self.stop_recording_btn.config(state="disabled")
+            self.status_bar.config(text="⏹️ Recording stopped")
+            self._log_execution("⏹️ Recording stopped")
+            
+            # 询问是否加载录制的代码
+            if self.recording_file_path and os.path.exists(self.recording_file_path):
+                result = messagebox.askyesno(
+                    "Load Recorded Code", 
+                    f"Recording saved to:\n{self.recording_file_path}\n\nDo you want to load the recorded code?"
+                )
+                if result:
+                    self._load_recorded_code()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to stop recording: {str(e)}")
+        finally:
+            self.recording_process = None
+    
+    def _load_recorded_code(self):
+        """加载录制的代码到代码输入区域"""
+        if not self.recording_file_path or not os.path.exists(self.recording_file_path):
+            messagebox.showwarning("Warning", "No recorded code file found")
+            return
+        
+        try:
+            with open(self.recording_file_path, 'r', encoding='utf-8') as f:
+                recorded_code = f.read()
+            
+            # 清空并加载录制的代码
+            self.code_input.delete("1.0", tk.END)
+            self.code_input.insert(tk.END, recorded_code)
+            
+            self._log_execution(f"📄 Loaded recorded code from: {os.path.basename(self.recording_file_path)}")
+            self.status_bar.config(text="✅ Recorded code loaded")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load recorded code: {str(e)}")
 
 def main():
     """Main function"""
