@@ -812,6 +812,10 @@ export default defineConfig({
   use: {
     trace: 'on-first-retry',
     ignoreHTTPSErrors: true,
+    // 启用CDP调试端口以支持录制连接
+    launchOptions: {
+      args: ['--remote-debugging-port=9222']
+    }
   },
   projects: [
     {
@@ -1482,9 +1486,17 @@ Please ensure each step has appropriate waiting and verification mechanisms."""
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             self.recording_file_path = os.path.join(recording_dir, f"recorded_test_{timestamp}.spec.ts")
             
-            # 启动 Playwright codegen
+            # 启动 Playwright codegen 连接到现有浏览器
             base_url = self.config["base_url"].get() or "https://example.com"
-            cmd = [self._get_npx_command(), "playwright", "codegen", base_url, "--output", self.recording_file_path]
+            cmd = [
+                self._get_npx_command(), 
+                "playwright", 
+                "codegen", 
+                "--browser-ws-endpoint=ws://localhost:9222",
+                base_url, 
+                "--output", 
+                self.recording_file_path
+            ]
             
             self.recording_process = subprocess.Popen(cmd, cwd=PROJECT_DIR)
             
@@ -1492,7 +1504,7 @@ Please ensure each step has appropriate waiting and verification mechanisms."""
             self.start_recording_btn.config(state="disabled")
             self.stop_recording_btn.config(state="normal")
             self.status_bar.config(text=f"🎬 Recording started - Output: {os.path.basename(self.recording_file_path)}")
-            self._log_execution(f"🎬 Started Playwright codegen recording")
+            self._log_execution(f"🎬 Started Playwright codegen recording (connected to localhost:9222)")
             self._log_execution(f"📁 Recording file: {self.recording_file_path}")
             self._log_execution(f"🌐 Target URL: {base_url}")
             
