@@ -531,18 +531,78 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 
 ### Key API Functions with Enhanced Description Requirements:
 - aiTap('detailed element description with visual and positional context'): Click/tap elements
-- aiInput('text', 'detailed input field description with visual characteristics and location'): Input text into elements
-- aiQuery({{key: 'detailed description of data to extract with visual context'}}): Extract data from UI
-- aiAssert('detailed assertion description with specific visual indicators and expected states'): Natural language assertions
-- aiWaitFor('detailed condition description with specific visual elements to wait for'): Wait for conditions
-- aiHover('detailed element description with visual and contextual information'): Hover over elements
-- aiKeyboardPress('key', 'detailed element description if targeting specific element'): Press keyboard keys
-- aiScroll({{direction: 'up/down/left/right'}}, 'detailed description of scrollable area or container'): Scroll
-- ai('complex multi-step action description with detailed element specifications'): For complex actions only
+  - Example: await aiTap('large orange button with white "Submit" text centered in the form')
+  - Best Practices:
+    - Specify color, size, shape (rectangular, circular, etc.)
+    - Include text content and icon details
+    - Mention container or section (e.g., "in the checkout panel")
+    - Note position relative to other elements (e.g., "below the password field")
 
-### Standard Template Structure:
-```typescript
-import {{ test as base }} from '@playwright/test';
+- aiInput('text', 'detailed input field description with visual characteristics and location'): Input text into elements
+  - Example: await aiInput('search query', 'long gray input bar with magnifying glass icon on the right in the top navigation')
+  - Best Practices:
+    - Describe placeholder text if available
+    - Include border style (e.g., "rounded border", "1px solid black")
+    - Note associated labels or icons
+    - Specify position in form or page section
+
+- aiQuery({{key: 'detailed description of data to extract with visual context'}}): Extract data from UI
+  - Example: await aiQuery({{productName: 'name of the first product in the search results grid'}})
+  - Best Practices:
+    - Define the container or section (e.g., "in the pricing table")
+    - Specify the type of data (text, number, image alt text)
+    - Include visual cues (e.g., "under the 'Price' column")
+    - Use precise positional language (e.g., "second item in the list")
+
+- aiAssert('detailed assertion description with specific visual indicators and expected states'): Natural language assertions
+  - Example: await aiAssert('product price is displayed in bold red text after discount is applied')
+  - Best Practices:
+    - Describe the expected visual state
+    - Include specific text, colors, or icons
+    - Mention any required conditions (e.g., "after clicking the add to cart button")
+    - Specify element location (e.g., "in the order summary panel")
+
+- aiWaitFor('detailed condition description with specific visual elements to wait for'): Wait for conditions
+  - Example: await aiWaitFor('loading spinner with three rotating dots disappears from the center of the page')
+  - Best Practices:
+    - Describe the visual cue that indicates completion
+    - Include timeouts if applicable (e.g., "for up to 10 seconds")
+    - Specify the element or area (e.g., "in the notification toast")
+    - Use precise language (e.g., "becomes visible" vs "disappears")
+
+- aiHover('detailed element description with visual and contextual information'): Hover over elements
+  - Example: await aiHover('blue hyperlink with text "Learn More" under the product description')
+  - Best Practices:
+    - Include text content and formatting (e.g., "underlined text")
+    - Note color and size
+    - Specify position relative to other elements
+    - Mention container or section
+
+- aiKeyboardPress('key', 'detailed element description if targeting specific element'): Press keyboard keys
+  - Example: await aiKeyboardPress('Enter', 'search input field with placeholder "Search products..."')
+  - Best Practices:
+    - Use standard key names (Enter, Tab, Escape, etc.)
+    - Describe the target element if not global
+    - Include visual details of the target element
+    - Specify context (e.g., "while the dropdown is open")
+
+- aiScroll({{direction: 'up/down/left/right'}}, 'detailed description of scrollable area or container'): Scroll
+  - Example: await aiScroll({{direction: 'down'}}, 'product catalog with 20 items per page')
+  - Best Practices:
+    - Use precise direction (down, up, left, right)
+    - Specify distance if applicable (e.g., "until the 'Load More' button is visible")
+    - Describe the scrollable container (e.g., "the vertical news feed")
+    - Include visual landmarks (e.g., "to the bottom of the FAQ section")
+
+- ai('complex multi-step action description with detailed element specifications'): For complex actions only
+  - Example: await ai('drag the red slider from 0% to 100% position on the volume control panel')
+  - Best Practices:
+    - Use only for truly complex interactions
+    - Break into sub-steps with clear visual descriptions
+    - Specify starting and ending conditions
+    - Include all necessary elements and their details
+
+### Standard Template Structure:import {{ test as base }} from '@playwright/test';
 import type {{ PlayWrightAiFixtureType }} from '@midscene/web/playwright';
 import {{ PlaywrightAiFixture }} from '@midscene/web/playwright';
 
@@ -569,9 +629,7 @@ test('{test_name}', async ({{
   page,
 }}) => {{
   // Test steps will be generated here
-}});
-```
-"""
+}});"""
             
             # Build user prompt
             user_prompt = f"""
