@@ -495,16 +495,50 @@ You are a professional Midscene AI test code generation expert. Generate high-qu
 9. **DO NOT use aiAction() for navigation - page navigation is handled in beforeEach**
 10. **Start test steps directly with UI interactions like aiTap, aiInput, etc.**
 
-### Key API Functions:
-- aiTap('element description'): Click/tap elements
-- aiInput('text', 'element description'): Input text into elements
-- aiQuery({{key: 'description'}}): Extract data from UI
-- aiAssert('assertion description'): Natural language assertions
-- aiWaitFor('condition description'): Wait for conditions
-- aiHover('element description'): Hover over elements
-- aiKeyboardPress('key', 'element description'): Press keyboard keys
-- aiScroll({{direction: 'up/down/left/right'}}, 'element description'): Scroll
-- ai('complex multi-step action description'): For complex actions only, avoid for simple navigation
+### CRITICAL: Element Description Requirements for VLM Recognition:
+**All element descriptions MUST be highly specific and detailed to help Vision Language Models accurately identify UI elements:**
+
+1. **Include Visual Characteristics:**
+   - Color, size, shape, position relative to other elements
+   - Text content, icons, or visual indicators
+   - Background color, border style, or visual styling
+
+2. **Include Contextual Information:**
+   - Location on page (top-left, center, bottom-right, etc.)
+   - Relationship to nearby elements
+   - Section or container the element belongs to
+
+3. **Include Functional Information:**
+   - Element type (button, input field, dropdown, link, etc.)
+   - Purpose or action the element performs
+   - State information (enabled/disabled, selected/unselected)
+
+### Element Description Examples:
+**❌ BAD (too vague):**
+- await aiTap('login button')
+- await aiInput('username', 'username field')
+- await aiAssert('form is submitted')
+
+**✅ GOOD (specific and detailed):**
+- await aiTap('blue rectangular login button with white text located at the bottom-right of the login form')
+- await aiInput('testuser@example.com', 'username input field with gray border and placeholder text "Enter your email" located at the top of the login form')
+- await aiAssert('green success message "Login successful" appears at the top of the page with checkmark icon')
+
+**✅ EXCELLENT (highly detailed for complex scenarios):**
+- await aiTap('red circular delete button with trash can icon located in the top-right corner of the user profile card with white background')
+- await aiInput('New Product Name', 'product name input field with blue focus border, located in the first row of the product creation form under the "Basic Information" section header')
+- await aiAssert('shopping cart icon in the top navigation bar shows red badge with number "3" indicating three items in cart')
+
+### Key API Functions with Enhanced Description Requirements:
+- aiTap('detailed element description with visual and positional context'): Click/tap elements
+- aiInput('text', 'detailed input field description with visual characteristics and location'): Input text into elements
+- aiQuery({{key: 'detailed description of data to extract with visual context'}}): Extract data from UI
+- aiAssert('detailed assertion description with specific visual indicators and expected states'): Natural language assertions
+- aiWaitFor('detailed condition description with specific visual elements to wait for'): Wait for conditions
+- aiHover('detailed element description with visual and contextual information'): Hover over elements
+- aiKeyboardPress('key', 'detailed element description if targeting specific element'): Press keyboard keys
+- aiScroll({{direction: 'up/down/left/right'}}, 'detailed description of scrollable area or container'): Scroll
+- ai('complex multi-step action description with detailed element specifications'): For complex actions only
 
 ### Standard Template Structure:
 ```typescript
@@ -537,13 +571,6 @@ test('{test_name}', async ({{
   // Test steps will be generated here
 }});
 ```
-
-### Code Generation Guidelines:
-- Use natural language descriptions for all element locations
-- Example: await aiInput('playwright', 'search input box') NOT await aiInput('playwright', '#search')
-- Example: await aiAssert('search results contain playwright') NOT await aiAssert(results.includes('playwright'))
-- Keep function calls clean and readable
-- Use proper waiting strategies with aiWaitFor
 """
             
             # Build user prompt
@@ -560,6 +587,9 @@ IMPORTANT CONSTRAINTS:
 3. Start the test directly with UI interactions like aiTap, aiInput, etc.
 4. The page is already loaded and ready when the test starts
 5. Focus on the actual UI interactions described in the test description
+6. **ONLY OUTPUT THE MIDSCENE TEST CODE - DO NOT include any explanations, comments, or additional descriptions**
+7. **DO NOT add any text before or after the code - just return the pure TypeScript code**
+8. **DO NOT include markdown code blocks or formatting - return raw code only**
 
 Please generate complete, directly executable Midscene AI test code following the template structure above.
 """
